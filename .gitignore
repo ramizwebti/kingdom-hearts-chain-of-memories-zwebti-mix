@@ -57,3 +57,6 @@ shot_*.bmp
 
 # test launchers belong to a local work copy, never to the repository root
 /*.bat
+
+# Generic Action Edition distribution preset (not personal runtime settings)
+!mod/action-edition/kh_com.ini

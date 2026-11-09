@@ -10,6 +10,16 @@ enum AttackResult {
     ATTACK_RESULT_BLOCKED
 };
 
+#ifdef PLATFORM_PC
+/* Independent actions keep their damage owner while the card channel serves
+ * another actor. Contexts may nest; restore the pointer returned by Set. NULL
+ * uses the original card-channel ownership. Do not retain a context between
+ * task updates or after destroying its actor. */
+BtlObj* BtlSetAttackSource(BtlObj* source);
+BtlObj* BtlGetAttackSource(void);
+u8 BtlAttackIsPlayer(void);
+#endif
+
 s32 ApplyAttackBox(s32 attack, s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 halfZ);
 void ColliderPoolsInit();
 void ColliderInit(Collider* collider, u32 type, u16 radius, u16 height);
