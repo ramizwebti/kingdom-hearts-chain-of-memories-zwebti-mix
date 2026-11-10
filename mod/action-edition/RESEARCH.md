@@ -1,4 +1,4 @@
-# Existing mod research — 9 November 2026
+# Kingdom Hearts Chain of Memories: Zwebti Mix — research, 9 November 2026
 
 The development base remains [ReKHCoM](https://github.com/MatyMeatBoy/ReKHCoM), rather than a fresh engine. It already supplies native rendering, widescreen, remappable controls, one-button dodge, HD menu/dialogue text, audio improvements and ROM importing. Those existing improvements are reused directly.
 

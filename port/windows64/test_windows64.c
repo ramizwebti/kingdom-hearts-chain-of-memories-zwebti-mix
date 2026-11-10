@@ -9,7 +9,8 @@
 #define PORT_ACT_COUNT 2
 static struct { int keys[PORT_ACT_COUNT][2]; } testInputConfig;
 static const uint16_t sActionBits[PORT_ACT_COUNT] = { 1, 8 };
-static uint16_t sKeyboard;
+static uint32_t sKeyboard, sKeyboardPressed;
+static int sGuardHeld, sGuardSuppressed;
 static int sBattleMenuKeys, sBattleMenuChord, sZoomSelect, sZoomEat;
 static int sDodgeHeld, sDodgePending, sUnstockHeld, sUnstockPending;
 static int sDeckPlaceHeld, sDeckPlacePending, sDeckCompactHeld, sDeckCompactPending; /* the deck editor's buttons (#432) */
@@ -65,6 +66,12 @@ int main(void) {
         assert(SDL_Init(SDL_INIT_VIDEO));
         sWindow = SDL_CreateWindow("ABI texture regression", 16, 16, SDL_WINDOW_HIDDEN);
         assert(sWindow);
+        H_set_title("ReKHCoM dynamic guest title");
+        assert(!strcmp(SDL_GetWindowTitle(sWindow), KHCOM_PRODUCT_TITLE));
+        H_set_title("Kingdom Hearts: Chain of Memories");
+        assert(!strcmp(SDL_GetWindowTitle(sWindow), KHCOM_PRODUCT_TITLE));
+        H_set_title("\001fullscreen=0");
+        assert(!strcmp(SDL_GetWindowTitle(sWindow), KHCOM_PRODUCT_TITLE));
         sRenderer = SDL_CreateRenderer(sWindow, NULL);
         assert(sRenderer);
         SDL_Event key = {0}; char eventText[96];

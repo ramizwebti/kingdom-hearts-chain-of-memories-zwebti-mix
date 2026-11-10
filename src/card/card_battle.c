@@ -6,6 +6,9 @@
 #include "macros.h"
 #ifdef PLATFORM_PC
 #include "port/port.h"
+#include "port/port_action_game.h"
+#include "key.h"
+#include "gba/keys.h"
 #include <stdlib.h>
 #endif
 #include "registration_data.h"
@@ -1331,6 +1334,9 @@ s32 cardbattleSora_1(CardBattleWork* work, Task* task) {
 static void cardbattle_2(CardBattleWork* work) {
     gCardBattleState->gfx = AnimUpdate(&gCardBattleState->anim);
     gCardBattleState->gfx2 = AnimUpdate(&gCardBattleState->anim2);
+#ifdef PLATFORM_PC
+    if (PortActionCombatRules()) return; /* no stock values, active cards or sleight-name UI */
+#endif
 
     if (gCardBattleState->cardsOpen && work->stockCount != 0 && work->stockValue != 0) {
 #ifdef PLATFORM_PC
@@ -4206,6 +4212,10 @@ static void card_2_Body(CardDisplayWork* work);
 /* Deck cards: bottom-left corner of the screen; stocked cards follow up to
    the HP gauge (top-left) instead of keeping the bottom's offset. */
 static void card_2(CardDisplayWork* work) {
+    /* Action combat has no card presentation.
+       Suppress only sprite emission; legacy card tasks still update safely. */
+    if (PortActionCombatRules())
+        return;
     PortHudBeginFollowY(-1);
     card_2_Body(work);
     PortHudEnd();
@@ -4328,6 +4338,10 @@ static void card_not_have_2_Body(CardDisplayWork* work);
 
 /* Deck cards: bottom-left corner of the screen. */
 void card_not_have_2(CardDisplayWork* work) {
+    /* Action combat has no card presentation.
+       Suppress only sprite emission; legacy card tasks still update safely. */
+    if (PortActionCombatRules())
+        return;
     PortHudBeginFollowY(-1);
     card_not_have_2_Body(work);
     PortHudEnd();
@@ -5423,6 +5437,10 @@ static void card_reload_2_Body(CardDisplayWork* work);
 
 /* Reload card: bottom-left corner of the screen. */
 void card_reload_2(CardDisplayWork* work) {
+    /* Action combat has no card presentation.
+       Suppress only sprite emission; legacy card tasks still update safely. */
+    if (PortActionCombatRules())
+        return;
     PortHudBeginFollowY(-1);
     card_reload_2_Body(work);
     PortHudEnd();

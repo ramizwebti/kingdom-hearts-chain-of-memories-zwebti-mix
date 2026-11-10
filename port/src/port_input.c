@@ -9,6 +9,9 @@
 #include "port/controller_prompt_glyphs.h"
 #include "port/port_ui.h"
 #include "port/port_netlink.h"
+#include "port/port_action_game.h"
+#include "port/port_action.h"
+#include "port/port_action_palette.h"
 #include "mode.h"
 #include "text_types.h"
 #include "msg.h"
@@ -33,6 +36,7 @@ extern Mode gModeBattle;
 #define KEY_STOCK PORT_KEY_STOCK
 #define KEY_DODGE PORT_KEY_DODGE
 #define KEY_UNSTOCK PORT_KEY_UNSTOCK
+#define KEY_GUARD PORT_KEY_GUARD
 
 /* Frames a dodge press waits for the battle code to take it. */
 #define DODGE_PENDING_FRAMES 6
@@ -43,12 +47,21 @@ extern Mode gModeBattle;
 #define TRIGGER_THRESHOLD 16000
 
 /* GBA key bit of each remappable action (port.h PORT_ACT_*). */
-static const uint16_t sActionBits[PORT_ACT_COUNT] = {
+static const uint32_t sActionBits[PORT_ACT_COUNT] = {
     KEY_A,   KEY_B,    KEY_L,    KEY_R,     KEY_START, KEY_SELECT,
     KEY_UP,  KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_STOCK, KEY_DODGE, KEY_UNSTOCK,
+    KEY_GUARD,
+    PORT_KEY_TECHNIQUE, PORT_KEY_MOVE_MENU,
+    PORT_KEY_MODIFIER, PORT_KEY_PREV_ASSIST, PORT_KEY_NEXT_ASSIST,
+    PORT_KEY_PREV_WEAPON, PORT_KEY_NEXT_WEAPON,
 };
 
-static uint16_t sKeyboard;
+static uint32_t sKeyboard;
+/* A complete physical tap can arrive in a single SDL event drain. Retain its
+ * down edge until the game samples this frame, even if key-up already arrived.
+ * UI queries may read this snapshot but never consume it. */
+static uint32_t sKeyboardPressed;
+static uint16_t sActionHeld,sActionPressed,sActionPrevious;
 static int sSuppress;
 static int sBattleMenuKeys, sBattleMenuChord;
 /* Select + Up/Down changes the zoom (Auto view): 0 Select up, 1 Select alone held back, 2 Select passed to the
@@ -57,6 +70,8 @@ static int sZoomSelect, sZoomEat;
 static uint16_t sZoomPrev;
 static int sDodgeHeld;
 static int sDodgePending;
+static int sGuardHeld;
+static int sGuardSuppressed;
 static int sLinkTap, sLinkTapKey; /* link battles: the dodge's d-pad double tap, frames left and its direction */
 static int sUnstockHeld;
 static int sUnstockPending;
@@ -203,10 +218,14 @@ int PortControllerSemanticGlyph(int token) {
    confirming press does not reach the game. */
 void PortInputSuppressUntilRelease(void) {
     sKeyboard = 0; /* the overlay may have consumed this key's release */
+    sKeyboardPressed = 0;
+    sActionHeld=sActionPressed=sActionPrevious=0;
     sSuppress = 1;
     sBattleMenuKeys = sBattleMenuChord = 0;
     sZoomSelect = sZoomEat = 0;
     sDodgeHeld = sDodgePending = 0;
+    sGuardHeld = 0;
+    sGuardSuppressed = 1;
     sUnstockHeld = sUnstockPending = 0;
     sDeckPlaceHeld = sDeckPlacePending = sDeckCompactHeld = sDeckCompactPending = 0;
 }
@@ -297,16 +316,20 @@ void PortInputHandleEvent(const void* p) {
             for (i = 0; i < PORT_ACT_COUNT * 2; i++) {
                 if (gPortConfig.keys[i / 2][i % 2] == 0 || (SDL_Keycode)gPortConfig.keys[i / 2][i % 2] != ev->key.key)
                     continue;
-                if (ev->type == SDL_EVENT_KEY_DOWN)
+                if (ev->type == SDL_EVENT_KEY_DOWN) {
                     sKeyboard |= sActionBits[i / 2];
-                else
+                    sKeyboardPressed |= sActionBits[i / 2];
+                } else
                     sKeyboard &= ~sActionBits[i / 2];
             }
             break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             sKeyboard = 0;
+            sKeyboardPressed = 0;
             sBattleMenuKeys = sBattleMenuChord = sZoomSelect = sZoomEat = 0;
             sDodgeHeld = sDodgePending = 0;
+            sGuardHeld = 0;
+            sGuardSuppressed = 1;
             sUnstockHeld = sUnstockPending = 0;
             sDeckPlaceHeld = sDeckPlacePending = sDeckCompactHeld = sDeckCompactPending = 0;
             break;
@@ -321,13 +344,21 @@ int PortInputKeyBound(int key) {
     return 0;
 }
 
-static uint16_t GamepadKeys(SDL_Gamepad* pad) {
-    uint16_t keys = 0;
+static uint32_t GamepadKeys(SDL_Gamepad* pad) {
+    uint32_t keys = 0;
     int lx, ly, i;
 
     for (i = 0; i < PORT_ACT_COUNT; i++) {
-        uint16_t bit = sActionBits[i];
+        uint32_t bit = sActionBits[i];
         int binding = gPortConfig.pad[i];
+        /* The classic stock binding shares Guard's default face button.
+         * Neither its shoulder chord nor its option-OFF attack fallback is
+         * meaningful in direct-action battles. Guard has its own binding. */
+        if (i == PORT_ACT_STOCK && PortActionCombatActive()) continue;
+        /* In action combat the D-pad selects assists/Keyblades; movement is
+         * on the left stick. Classic menus retain their original D-pad. */
+        if (PortActionCombatActive() && i>=PORT_ACT_UP && i<=PORT_ACT_RIGHT &&
+            binding>=SDL_GAMEPAD_BUTTON_DPAD_UP && binding<=SDL_GAMEPAD_BUTTON_DPAD_RIGHT) continue;
         if (binding < 0) continue;
         if (binding >= PORT_PAD_AXIS_BASE) {
             int encoded = binding - PORT_PAD_AXIS_BASE;
@@ -355,7 +386,8 @@ static uint16_t GamepadKeys(SDL_Gamepad* pad) {
     if (ly > STICK_DEADZONE)
         keys |= KEY_DOWN;
 
-    /* Right stick for the cards: left / right = L / R, up = L + R (stock). */
+    if(PortActionCombatActive()) return keys;
+    /* Right stick for classic cards. Action combat uses its click for assists. */
     lx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX);
     ly = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
     if (lx < -STICK_DEADZONE * 2)
@@ -370,8 +402,8 @@ static uint16_t GamepadKeys(SDL_Gamepad* pad) {
     return keys;
 }
 
-uint16_t PortInputKeys(void) {
-    uint16_t keys = sKeyboard;
+uint32_t PortInputKeys(void) {
+    uint32_t keys = sKeyboard | sKeyboardPressed;
     SDL_JoystickID* ids;
     int count, i;
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__) || defined(PORT_ANDROID64) || defined(PORT_TOUCH)
@@ -392,16 +424,22 @@ uint16_t PortInputKeys(void) {
     }
     if (!gPortConfig.unstockButton)
         keys &= ~KEY_UNSTOCK;
+    if (!PortActionCombatActive())
+        keys &= ~(KEY_GUARD | PORT_KEY_TECHNIQUE | PORT_KEY_MOVE_MENU);
+    if (sSuppress) {
+        /* Suppression already cleared old keyboard state. A new non-repeat
+         * keyboard event is fresh input, while old held pad buttons still
+         * wait for release. Do not let a UI read consume a short tap. */
+        if (keys != 0)
+            keys &= sKeyboard | sKeyboardPressed;
+        else
+            sSuppress = 0;
+    }
     /* The hardware cannot report opposite directions at once. */
     if ((keys & (KEY_LEFT | KEY_RIGHT)) == (KEY_LEFT | KEY_RIGHT))
         keys &= ~(KEY_LEFT | KEY_RIGHT);
     if ((keys & (KEY_UP | KEY_DOWN)) == (KEY_UP | KEY_DOWN))
         keys &= ~(KEY_UP | KEY_DOWN);
-    if (sSuppress) {
-        if (keys != 0)
-            return 0;
-        sSuppress = 0;
-    }
     return keys;
 }
 
@@ -581,7 +619,7 @@ const void* PortCardScrollTutorialText(int message, const void* source) {
 /* Select + Up/Down: the main zoom, at any moment (Auto view). Select alone reaches the game when it is released,
    so the chord neither opens the floor map nor switches the card list; with any other button (soft reset
    Start+Select+A+B, debug shortcuts) it reaches the game as it is held. */
-static uint16_t ZoomChord(uint16_t keys) {
+static uint32_t ZoomChord(uint32_t keys) {
     uint16_t raw = keys, others = keys & ~(KEY_SELECT | KEY_UP | KEY_DOWN);
     uint16_t pressed = keys & ~sZoomPrev & (KEY_UP | KEY_DOWN);
 
@@ -625,11 +663,30 @@ static void DeckButton(int down, int* held, int* pending) {
     *held = down;
 }
 
-uint16_t PortInputResolve(uint16_t keys) {
+uint16_t PortInputResolve(uint32_t keys) {
     int dodge;
+    int action = PortActionCombatActive();
+
+    PortActionPaletteInput((uint16_t)keys); /* isolated catalog diagnostics only */
+    sActionHeld=0;
+    if(action && !PortUiActive()) {
+        if((keys&PORT_KEY_TECHNIQUE) && !PortActionPaletteDiagnosticActive()) sActionHeld|=PORT_ACTION_MAGIC;
+        if(keys&PORT_KEY_MOVE_MENU) sActionHeld|=PORT_ACTION_ASSIST;
+        if(keys&PORT_KEY_MODIFIER) sActionHeld|=PORT_ACTION_MODIFIER;
+        if(keys&PORT_KEY_PREV_ASSIST) sActionHeld|=PORT_ACTION_PREV_ASSIST;
+        if(keys&PORT_KEY_NEXT_ASSIST) sActionHeld|=PORT_ACTION_NEXT_ASSIST;
+        if(keys&PORT_KEY_PREV_WEAPON) sActionHeld|=PORT_ACTION_PREV_WEAPON;
+        if(keys&PORT_KEY_NEXT_WEAPON) sActionHeld|=PORT_ACTION_NEXT_WEAPON;
+    }
+    sActionPressed=sActionHeld&~sActionPrevious;sActionPrevious=sActionHeld;
 
     keys = ZoomChord(keys);
     dodge = (keys & KEY_DODGE) && gPortConfig.dodgeButton;
+    /* Guard is a held action, not a repeated key press or a shoulder chord.
+     * The top face button shares the classic stock default; in Sora's action
+     * battles it must never also cast or change the selected spell. */
+    if (!(keys & KEY_GUARD)) sGuardSuppressed = 0;
+    sGuardHeld = action && !sGuardSuppressed && (keys & KEY_GUARD) != 0;
 
     /* Defer battle Start/Select until release: either can be the first half
        of the options shortcut, which must neither pause nor switch lists. */
@@ -648,11 +705,11 @@ uint16_t PortInputResolve(uint16_t keys) {
     }
 
     /* Reverse local battle inputs once, before hold/chord detection and link transmission. */
-    if (gPortConfig.invertCardScroll && (gCurrentMode == &gModeBattle || gCurrentMode == &gModeVsbattle))
+    if (!action && gPortConfig.invertCardScroll && (gCurrentMode == &gModeBattle || gCurrentMode == &gModeVsbattle))
         keys = (keys & ~(KEY_L | KEY_R)) | ((keys & KEY_L) >> 1) | ((keys & KEY_R) << 1);
 
     /* Stock button: L and R together, without pressing both shoulders. */
-    if ((keys & KEY_STOCK) && gPortConfig.stockButton)
+    if (!action && (keys & KEY_STOCK) && gPortConfig.stockButton)
         keys |= KEY_L | KEY_R;
     /* Dodge button: a press is kept for a few frames for the battle code. */
     if (dodge && !sDodgeHeld)
@@ -683,17 +740,27 @@ uint16_t PortInputResolve(uint16_t keys) {
     DeckButton((keys & KEY_DODGE) != 0, &sDeckPlaceHeld, &sDeckPlacePending);
     DeckButton((keys & KEY_STOCK) != 0, &sDeckCompactHeld, &sDeckCompactPending);
     /* Return-stocked-cards button: acts once when held long enough. */
-    if ((keys & KEY_UNSTOCK) && gPortConfig.unstockButton) {
+    if (!action && (keys & KEY_UNSTOCK) && gPortConfig.unstockButton) {
         if (sUnstockHeld <= UNSTOCK_HOLD_FRAMES && ++sUnstockHeld == UNSTOCK_HOLD_FRAMES)
             sUnstockPending = DODGE_PENDING_FRAMES;
     } else {
         sUnstockHeld = 0;
-        if (!gPortConfig.unstockButton)
+        if (action || !gPortConfig.unstockButton)
             sUnstockPending = 0;
     }
     if (sUnstockPending > 0 && sUnstockHeld != UNSTOCK_HOLD_FRAMES)
         sUnstockPending--;
+    /* Exactly one sample consumes queued keyboard edges. Held keys remain in
+     * sKeyboard; ignored OS repeat cannot enqueue another attack. */
+    sKeyboardPressed = 0;
     return keys & 0x3FF;
+}
+
+uint16_t PortInputActionHeld(void) { return sActionHeld; }
+uint16_t PortInputActionPressed(void) { return sActionPressed; }
+
+int PortActionGuardHeld(void) {
+    return sGuardHeld && PortActionCombatActive() && !PortUiActive();
 }
 
 /* Battle code: the dodge button acts as the second tap of a d-pad double tap
@@ -728,7 +795,7 @@ int PortTakeDeckCompact(void) {
 
 /* Battle code: 1 once after the return-stocked-cards button was held. */
 int PortTakeUnstock(void) {
-    int pending = gPortConfig.unstockButton && sUnstockPending > 0;
+    int pending = !PortActionCombatActive() && gPortConfig.unstockButton && sUnstockPending > 0;
 
     sUnstockPending = 0;
     return pending;

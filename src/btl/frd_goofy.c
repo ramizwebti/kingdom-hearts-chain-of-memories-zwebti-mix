@@ -22,6 +22,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
 
 static const AnimDef sFrdGoofyAnimDefs[5] = {
@@ -114,6 +117,9 @@ void task_frd_goofy_0(FrdGoofyWork* work, FrdArgs* args) {
     body->y = work->actor->y;
     body->z = -0x5000;
     body->groundZ = 0;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gGoofyPalette, sizeof(gGoofyPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdGoofyAnimDefs, &work->anim, 0, 0, work->tiles);

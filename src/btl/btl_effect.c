@@ -319,6 +319,9 @@ BgAnimationDef gBgAnimDefRikuDiveHit = { &sBgAnimationChunks[107], gBgAnimRikuDi
 
 static BgFx* sBgFx;
 #ifdef PLATFORM_PC
+/* The background effect outlives the action that created it. Preserve its
+ * independent damage owner without changing the cartridge's BgFx layout. */
+static BtlObj* sBgFxAttackSource;
 /* RA conditions anchor their heap-relative reads at this original global,
  * not gBtlWork. Keep access read-only; no battle/effect lifetime changes. */
 const void* PortRaBgFxWork(void) { return sBgFx; }
@@ -326,6 +329,9 @@ const void* PortRaBgFxWork(void) { return sBgFx; }
 
 
 void BgFxReset() {
+#ifdef PLATFORM_PC
+    sBgFxAttackSource = BtlGetAttackSource();
+#endif
     if (gBtlWork->flags & BTL_FLAG_BOSS_BATTLE) {
         SetBgPriority(sBgFx->bg, 0);
     } else {
@@ -396,6 +402,9 @@ void BgFxInit(u16 colorMode, u16 bg) {
 }
 
 void BgFxFree() {
+#ifdef PLATFORM_PC
+    sBgFxAttackSource = NULL;
+#endif
     EwramFree(sBgFx);
 }
 
@@ -409,7 +418,13 @@ void BgFxUpdate() {
     }
 
     if (sBgFx->update != NULL) {
+#ifdef PLATFORM_PC
+        BtlObj* previousSource = BtlSetAttackSource(sBgFxAttackSource);
+#endif
         sBgFx->update();
+#ifdef PLATFORM_PC
+        BtlSetAttackSource(previousSource);
+#endif
 
         if (!(gBtlWork->flags & BTL_FLAG_BOSS_BATTLE)) {
             gBtlWork->bossY = sBgFx->y;

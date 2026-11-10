@@ -201,7 +201,9 @@ bool SDL_SetRenderVSync(SDL_Renderer* renderer, int vsync);
 bool SDL_GetRenderVSync(SDL_Renderer* renderer, int* vsync);
 bool SDL_GetCurrentRenderOutputSize(SDL_Renderer* renderer, int* w, int* h);
 bool SDL_SetRenderDrawColor(SDL_Renderer* renderer, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+bool SDL_GetRenderDrawColor(SDL_Renderer* renderer, Uint8* r, Uint8* g, Uint8* b, Uint8* a);
 bool SDL_SetRenderDrawBlendMode(SDL_Renderer* renderer, SDL_BlendMode mode);
+bool SDL_GetRenderDrawBlendMode(SDL_Renderer* renderer, SDL_BlendMode* blendMode);
 bool SDL_SetRenderViewport(SDL_Renderer* renderer, const SDL_Rect* rect);
 bool SDL_SetRenderClipRect(SDL_Renderer* renderer, const SDL_Rect* rect);
 bool SDL_SetRenderScale(SDL_Renderer* renderer, float x, float y);
@@ -270,6 +272,8 @@ typedef int SDL_Scancode;
 #define SDLK_V 0x76u
 #define SDLK_W 0x77u
 #define SDLK_E 0x65u
+#define SDLK_F 0x66u
+#define SDLK_R 0x72u
 #define SDLK_Q 0x71u
 #define SDLK_PAGEUP 0x4000004Bu
 #define SDLK_PAGEDOWN 0x4000004Eu

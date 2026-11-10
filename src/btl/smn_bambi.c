@@ -24,6 +24,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
 #include "battle.h"
 
@@ -60,6 +63,7 @@ enum SmnBambiState {
 void task_smn_bambi_0(SmnBambiWork* work, SmnArgs* args) {
     BtlObj* body;
     BtlObj* actor;
+    s32 spawnX, spawnY, spawnZ;
 
     body = &work->body;
 
@@ -75,12 +79,16 @@ void task_smn_bambi_0(SmnBambiWork* work, SmnArgs* args) {
         work->tiles = gBtlWork->tiles2;
     }
 
+    spawnX=actor->originX;spawnY=actor->originY;spawnZ=actor->originZ;
+#ifdef PLATFORM_PC
+    PortActionAssistSpawnOrigin(args->mainSide,&spawnX,&spawnY,&spawnZ);
+#endif
     body->x = (gBtlWork->xMin
                     + GetRandom() % (gBtlWork->xMax - gBtlWork->xMin + 1)) << 8;
     body->y = (gBtlWork->yMin
                     + GetRandom() % (gBtlWork->yMax - gBtlWork->yMin + 1)) << 8;
-    body->z = actor->originZ;
-    body->groundZ = actor->originZ;
+    body->z = spawnZ;
+    body->groundZ = spawnZ;
 
     if (actor->flags & BTLOBJ_FLAG_FACING_LEFT) {
         body->flags = 0;
@@ -91,6 +99,9 @@ void task_smn_bambi_0(SmnBambiWork* work, SmnArgs* args) {
     }
 
     work->variant = args->variant;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gBanbPalette, sizeof(gBanbPalette));
     work->vz = 0;
     AnimInit(&work->anim, NULL, NULL);

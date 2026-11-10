@@ -35,6 +35,9 @@
 #include "map_runtime.h"
 #ifdef PLATFORM_PC
 #include "engine.h"
+#include "port/port.h"
+#include "port/port_action_game.h"
+#include "port/port_action_enemy.h"
 #endif
 #include "mode.h"
 #include "obj.h"
@@ -61,6 +64,9 @@
 
 s32 gUnk_02039DC0 EWRAM_COMMON(4);
 s32* gLockonDoorPosition EWRAM_COMMON(4);
+#ifdef PLATFORM_PC
+static u8 RequestActionShadowAttack(BtlObj* actor);
+#endif
 
 void SetBattleZoom(u16 steps, s32 scale, s32 x, s32 y) {
     gBtlWork->zoomScale = scale;
@@ -176,6 +182,15 @@ void BtlWorkInit() {
 
 void UpdateEnemyCardUse() {
     BtlObj* enemy;
+#ifdef PLATFORM_PC
+    /* Catch a request left in the legacy slot before action dispatch. */
+    if (gBtlWork->actor4 != NULL && PortActionShadowIndependent(gBtlWork->actor4)) {
+        enemy = gBtlWork->actor4;
+        gBtlWork->actor4 = NULL;
+        RequestActionShadowAttack(enemy);
+        return;
+    }
+#endif
 
     if (gBtlWork->flags & BTL_FLAG_OPPONENT_CARD_ACTION) {
         return;
@@ -207,6 +222,10 @@ void HandleSoraCardInput() {
     BtlObj* player;
     u16 timer;
     u16 chord;
+#ifdef PLATFORM_PC
+    /* Action rules have no combat deck, including while Select is held. */
+    if (PortActionCombatRules()) return;
+#endif
 
     if (gBtlWork->flags & BTL_FLAG_GIMMICK_CARD_ACTIVE) {
         return;
@@ -558,14 +577,17 @@ void HandleTutorialCardInput() {
 void MakeOpponentsHittable() {
     BtlWork* btl = gBtlWork;
     BtlObj* opponent;
+#ifndef PLATFORM_PC
+#define BtlAttackIsPlayer() ((btl->flags & BTL_FLAG_PLAYER_CARD_ACTION) != 0)
+#endif
 
     if (btl->flags & BTL_FLAG_VS_BATTLE) {
-        if (btl->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+        if (BtlAttackIsPlayer()) {
             opponent = gRikuBtlWork->actor;
             opponent->flags &= ~BTLOBJ_FLAG_HIT_LOCKED;
             return;
         }
-    } else if (btl->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+    } else if (BtlAttackIsPlayer()) {
         opponent = ListPoolFirst(&btl->pool);
 
         while (opponent != NULL) {
@@ -580,10 +602,17 @@ void MakeOpponentsHittable() {
     opponent = btl->actor;
     opponent->flags &= ~BTLOBJ_FLAG_HIT_LOCKED;
 }
+#ifndef PLATFORM_PC
+#undef BtlAttackIsPlayer
+#endif
 
 void DropFriendCard(s32 x, s32 y, s32 z) {
     u16 flags;
     s16 friendIndex;
+#ifdef PLATFORM_PC
+    /* Support is supplied by the action roster, never a floating card. */
+    if (PortActionCombatRules()) return;
+#endif
 
     flags = gGameState.progression.friendFlags;
 
@@ -1057,7 +1086,11 @@ void UpdateBattleState() {
 
         busy = FALSE;
 
-        if (player->flags & BTLOBJ_FLAG_IN_CARD_ACTION) {
+        if ((player->flags & BTLOBJ_FLAG_IN_CARD_ACTION)
+#ifdef PLATFORM_PC
+            && !PortActionPlayerIndependent()
+#endif
+        ) {
             busy = TRUE;
         }
 
@@ -1068,7 +1101,11 @@ void UpdateBattleState() {
         obj = ListPoolFirst(&gBtlWork->pool);
 
         while (obj != NULL) {
-            if (obj->flags & BTLOBJ_FLAG_IN_CARD_ACTION) {
+            if ((obj->flags & BTLOBJ_FLAG_IN_CARD_ACTION)
+#ifdef PLATFORM_PC
+                && !PortActionShadowIndependent(obj)
+#endif
+            ) {
                 busy = TRUE;
                 break;
             }
@@ -1977,7 +2014,58 @@ void SetBattleActorPosition(s32 x, s32 y, s32 z) {
     gBtlWork->actor->z = z;
 }
 
+#ifdef PLATFORM_PC
+static u32 sLastActionShadowAttackFrame;
+
+int PortActionShadowIndependent(const BtlObj* actor) {
+    return actor != NULL && actor->kind == ENEMY_SHADOW && PortActionCombatRules() &&
+        !(gBtlWork->flags & (BTL_FLAG_BOSS_BATTLE | BTL_FLAG_HUM_BATTLE | BTL_FLAG_TUTORIAL));
+}
+
+static int ActionShadowTraceEnabled(void) {
+    const char* trace;
+    PORT_ENV_ONCE(trace, getenv, "KHCOM_ACTION_TRACE");
+    return trace != NULL && trace[0] != '\0' && trace[0] != '0';
+}
+
+static u8 RequestActionShadowAttack(BtlObj* actor) {
+    BtlObj* other;
+    unsigned active = 0;
+
+    if (!PortActionShadowIndependent(actor)) return FALSE;
+    /* Requests are consumed even when the crowd budget is full. They never
+     * fall through to the single legacy enemy-card slot. */
+    if (gBtlWork->actor4 == actor) gBtlWork->actor4 = NULL;
+    if ((gBtlWork->phase != BTL_PHASE_IDLE && gBtlWork->phase != BTL_PHASE_CARD_PLAY) ||
+        actor->hp <= 0 || actor->delayedDamage != 0 ||
+        (actor->badStatus != BAD_STATUS_NONE && actor->badStatus != BAD_STATUS_CONFUSE) ||
+        (actor->flags & (BTLOBJ_FLAGS_NO_CARD_USE | BTLOBJ_FLAGS_STATUS_PENDING |
+            BTLOBJ_FLAG_IN_CARD_ACTION | BTLOBJ_FLAG_CARD_ACTION_PENDING |
+            BTLOBJ_FLAG_CARD_BREAK_PENDING | BTLOBJ_FLAG_HEAL_PENDING |
+            BTLOBJ_FLAG_GRAVITY_PENDING | BTLOBJ_FLAG_HAZARD_PENDING |
+            BTLOBJ_FLAG_WARP_PENDING | BTLOBJ_FLAG_FREEZE_PENDING))) return TRUE;
+
+    for (other = ListPoolFirst(&gBtlWork->pool); other != NULL;
+            other = ListPoolNext(&other->node)) {
+        if (other->hp > 0 && (other->flags &
+                (BTLOBJ_FLAG_IN_CARD_ACTION | BTLOBJ_FLAG_CARD_ACTION_PENDING))) active++;
+    }
+    /* Preserve the authored 14/31-frame tells. At most three enemies may
+     * wind up or attack together, and new starts are spaced by twelve ticks. */
+    if (active >= 3 || (u32)(gFrameCounter - sLastActionShadowAttackFrame) < 12) return TRUE;
+    sLastActionShadowAttackFrame = gFrameCounter;
+    actor->flags |= BTLOBJ_FLAG_CARD_ACTION_PENDING;
+    if (ActionShadowTraceEnabled())
+        PortLog("action: shadow attack frame=%u concurrent=%u at=%d,%d",
+                (unsigned)gFrameCounter, active + 1, actor->x >> 8, actor->y >> 8);
+    return TRUE;
+}
+#endif
+
 void RequestEnemyCardUse(BtlObj* obj) {
+#ifdef PLATFORM_PC
+    if (RequestActionShadowAttack(obj)) return;
+#endif
     if (!(obj->flags & BTLOBJ_FLAGS_NO_CARD_USE)) {
         gBtlWork->actor4 = obj;
     }
@@ -2003,6 +2091,9 @@ void TryEnemyCardUse(BtlObj* obj) {
     GetEnemyTargetPosition(obj, &x, &y, NULL);
 
     if (obj->attackRangeX == 0) {
+#ifdef PLATFORM_PC
+        if (RequestActionShadowAttack(obj)) return;
+#endif
         gBtlWork->actor4 = obj;
         return;
     }
@@ -2038,6 +2129,9 @@ void TryEnemyCardUse(BtlObj* obj) {
         return;
     }
 
+#ifdef PLATFORM_PC
+    if (RequestActionShadowAttack(obj)) return;
+#endif
     gBtlWork->actor4 = obj;
 }
 
@@ -2275,6 +2369,15 @@ void DropGimmickCard(u8 index, s32 x, s32 y, s32 z) {
     }
 
 #ifdef PLATFORM_PC
+    if (PortActionCombatRules()) {
+        /* The original card's final effect is this flag. Activate the boss
+         * reaction directly at its earned opportunity, without spawning a
+         * deck item or freezing combat for the flying-card presentation. */
+        SetGimmickFlag(index);
+        m4aSongNumStart(SONG_BTL_GMIC_OK);
+        PortLog("action: boss reaction activated %d", (int)index);
+        return;
+    }
     PortLog("battle: gimmick card %d dropped", index);
 #endif
     CreateGimmickCardTask(&gBtlWork->taskPools[0], x >> 8, y >> 8, z >> 8, id);

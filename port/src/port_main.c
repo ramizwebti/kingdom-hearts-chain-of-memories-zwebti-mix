@@ -29,6 +29,12 @@ extern int PortBridgeVideoCaps(void);
 #include <string.h>
 
 #include "port/port.h"
+#include "port/port_action_game.h"
+#include "port/port_action_hud.h"
+#include "port/port_action_palette.h"
+#include "port/port_pixel_ui.h"
+#include "port/port_practice.h"
+#include "port/port_action_fx.h"
 #include "port/port_netlink.h"
 #include "port/port_logfile.h"
 #include "port/port_version.h"
@@ -1731,6 +1737,8 @@ static int RendererResetService(void) {
     PortHdSpritesShutdown();
     PortHdLayoutShutdown();
     PortHdTextShutdown();
+    PortPixelUiReset();
+    PortActionFxRendererReset();
     PortAchievementToastInvalidate();
     PortSceneGalleryPreviewInvalidate();
     sRendererResetPending = 0;
@@ -2311,6 +2319,11 @@ static void Present(int paced) {
         if (!menuCanvas)
             PortHdTextDraw(sRenderer, 2, od.x, od.y, sOverlayScale);
     }
+    if (!menuCanvas && !PortUiActive())
+        PortTitleBrandDraw(sRenderer,worldX,worldY,worldScale);
+    if (!menuCanvas && !PortUiActive() && PortActionCombatActive())
+        PortActionFxDraw(sRenderer,worldX+gPortScreen.originX*worldScale,
+                         worldY+gPortScreen.originY*worldScale,worldScale);
     if (PortPpuHudActive() && !menuCanvas) {
         int savedHud[4];
         PortPpuHudFrameBegin(savedHud);
@@ -2390,7 +2403,20 @@ static void Present(int paced) {
         PortHdHudDrawLabel(sRenderer, outW, outH);
         if (!menuCanvas) PortHdTextHudDigits(sRenderer, hd.x, hd.y, (float)gPortHudScale);
         PortHdTextDraw(sRenderer, 1, hd.x, hd.y, (float)gPortHudScale);
+        if (!PortUiActive()) {
+            const PortActionState* action = PortActionGameState();
+            if (action) PortActionHudDraw(sRenderer, action, hd.x, hd.y, (float)gPortHudScale);
+        }
         PortPpuHudFrameEnd(savedHud);
+    } else if (!menuCanvas && !PortUiActive()) {
+        const PortActionState* action = PortActionGameState();
+        if (action) {
+            /* PortHudBegin(-1,-1) cancels the wide world's origin. A narrow
+             * GBA picture keeps it; use the same transform as the HP sprites. */
+            float hx = worldX + (gPortScreen.wide ? 0 : gPortScreen.originX) * worldScale;
+            float hy = worldY + (gPortScreen.wide ? 0 : gPortScreen.originY) * worldScale;
+            PortActionHudDraw(sRenderer, action, hx, hy, worldScale);
+        }
     }
     {
         /* the scene pause's panel above every HD layer (it is drawn on the picture, under them) */
@@ -2468,7 +2494,9 @@ static void Present(int paced) {
     {
         int fullW = 0, fullH = 0;
         SDL_GetCurrentRenderOutputSize(sRenderer, &fullW, &fullH);
+        if (!PortUiActive()) PortPracticeDraw(sRenderer,fullW,fullH);
         PortAchievementToastDraw(sRenderer, fullW, fullH);
+        if(!PortUiActive()) PortActionPaletteDraw(sRenderer,fullW,fullH);
     }
     if (sceneFade > 0) {
         /* Fade the final scene rather than its world buffer alone. This keeps
@@ -2694,14 +2722,20 @@ static uint16_t MonkeyKeys(uint32_t frame) {
 
 extern uint16_t PortBotKeys(uint32_t frame); /* port_testbot.c, KHCOM_BOT */
 
-static uint16_t HarnessKeys(uint32_t frame) {
-    static const struct { const char* name; uint16_t bit; } names[] = {
+static uint32_t HarnessKeys(uint32_t frame) {
+    static const struct { const char* name; uint32_t bit; } names[] = {
         { "A", 1 }, { "B", 2 }, { "SELECT", 4 }, { "START", 8 }, { "RIGHT", 16 },
         { "LEFT", 32 }, { "UP", 64 }, { "DOWN", 128 }, { "R", 256 }, { "L", 512 },
         { "STOCK", PORT_KEY_STOCK }, { "DODGE", PORT_KEY_DODGE }, { "UNSTOCK", PORT_KEY_UNSTOCK },
+        { "GUARD", PORT_KEY_GUARD },
+        { "TECHNIQUE", PORT_KEY_TECHNIQUE }, { "MOVE_MENU", PORT_KEY_MOVE_MENU },
+        { "CAST", PORT_KEY_TECHNIQUE }, { "ASSIST", PORT_KEY_MOVE_MENU },
+        { "MODIFIER", PORT_KEY_MODIFIER }, { "ASSIST_PREV", PORT_KEY_PREV_ASSIST },
+        { "ASSIST_NEXT", PORT_KEY_NEXT_ASSIST }, { "WEAPON_PREV", PORT_KEY_PREV_WEAPON },
+        { "WEAPON_NEXT", PORT_KEY_NEXT_WEAPON },
     };
     const char* p = SDL_getenv("KHCOM_KEYS");
-    uint16_t keys = MovieKeys(frame) | MonkeyKeys(frame);
+    uint32_t keys = MovieKeys(frame) | MonkeyKeys(frame);
     {
         extern int gPortGalleryEvent;
         extern unsigned PortSceneGalleryAge(void);
@@ -3064,6 +3098,8 @@ static void PumpEvents(void) {
                 }
                 break;
         }
+        if (PortActionPaletteEvent(&ev))
+            continue;
         if (PortUiHandleEvent(&ev))
             continue;
         PortInputHandleEvent(&ev);
@@ -3367,7 +3403,7 @@ static void VBlankCycle(void) {
         if (PortUiTakeMenuSound(1))
             PortMenuSoundDecide(0); /* SYS_CANSEL: the field menu's opening */
     }
-    while (PortUiActive()) {
+    while (PortUiActive() || PortActionPaletteActive()) {
         extern void PortMenuSoundFrame(void);
         extern void PortAudioMenuFrame(void);
 #ifdef __EMSCRIPTEN__
@@ -3382,6 +3418,8 @@ static void VBlankCycle(void) {
             PortPpuRenderFrame();
         Present(1);
         PumpEvents();
+        if(PortActionPaletteActive() && !PortUiActive())
+            (void)PortInputResolve(PortInputKeys() | (SDL_getenv("KHCOM_VPAD") ? HarnessKeys(sFrameCount) : 0));
 #if defined(__ANDROID__) || defined(PORT_ANDROID64)
         while (sAndroidBackground) { SDL_Delay(50); PumpEvents(); }
 #endif

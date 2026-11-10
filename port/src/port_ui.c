@@ -202,6 +202,14 @@ enum {
     ITEM_CONTROL_STOCK,
     ITEM_CONTROL_DODGE,
     ITEM_CONTROL_UNSTOCK,
+    ITEM_CONTROL_GUARD,
+    ITEM_CONTROL_TECHNIQUE,
+    ITEM_CONTROL_MOVE_MENU,
+    ITEM_CONTROL_MODIFIER,
+    ITEM_CONTROL_PREV_ASSIST,
+    ITEM_CONTROL_NEXT_ASSIST,
+    ITEM_CONTROL_PREV_WEAPON,
+    ITEM_CONTROL_NEXT_WEAPON,
     ITEM_CONTROL_RESET,
     ITEM_CONTROL_NINTENDO_HEADING, /* section heading, not selectable */
     ITEM_PAD_LAYOUT,               /* force the Nintendo layout */
@@ -552,6 +560,14 @@ static const char* const sLabels[ITEM_COUNT][LANG_COUNT] = {
     { "Dodge roll / Place card", "Esquive / Placer la carte", "Ausweichen / Karte einfügen", "Schiva / Inserisci carta",
       "Esquivar / Colocar carta", "ドッジ / カードをいれる" },
     { "Return cards", "Rendre les cartes", "Karten zurückgeben", "Restituisci carte", "Devolver cartas", "カードを戻す" },
+    { "Guard (action combat)", "Garde (combat d'action)", "Blocken (Aktionskampf)", "Parata (combattimento d'azione)", "Bloqueo (combate de acción)", "ガード（アクション戦闘）" },
+    { "Cast magic", "Cast magic", "Cast magic", "Cast magic", "Cast magic", "Cast magic" },
+    { "Call assist", "Call assist", "Call assist", "Call assist", "Call assist", "Call assist" },
+    { "Elemental modifier", "Elemental modifier", "Elemental modifier", "Elemental modifier", "Elemental modifier", "Elemental modifier" },
+    { "Previous assist", "Previous assist", "Previous assist", "Previous assist", "Previous assist", "Previous assist" },
+    { "Next assist", "Next assist", "Next assist", "Next assist", "Next assist", "Next assist" },
+    { "Previous Keyblade", "Previous Keyblade", "Previous Keyblade", "Previous Keyblade", "Previous Keyblade", "Previous Keyblade" },
+    { "Next Keyblade", "Next Keyblade", "Next Keyblade", "Next Keyblade", "Next Keyblade", "Next Keyblade" },
     { "Restore defaults", "Restaurer par défaut", "Standard wiederherstellen", "Ripristina predefiniti", "Restaurar predeterminados", "初期値に戻す" },
     { "Nintendo controller", "Manette Nintendo", "Nintendo-Controller", "Controller Nintendo", "Mando Nintendo", "ニンテンドーのコントローラー" },
     { "Force Nintendo layout", "Forcer la disposition Nintendo", "Nintendo-Belegung erzwingen", "Forza disposizione Nintendo",
@@ -1665,7 +1681,7 @@ static void ValueText(int item, char* out, size_t size) {
             SDL_snprintf(out, size, "%d%%", gPortConfig.masterVolume);
             break;
         default:
-            if (item >= ITEM_CONTROL_A && item <= ITEM_CONTROL_UNSTOCK) {
+            if (item >= ITEM_CONTROL_A && item <= ITEM_CONTROL_NEXT_WEAPON) {
                 int action = item - ITEM_CONTROL_A;
                 if (sControlCapture) SDL_strlcpy(out, "Press...", size);
                 else if (sControlPad) {
@@ -1707,6 +1723,9 @@ static void ResetControlBindings(void) {
         { SDLK_RETURN, 0 }, { SDLK_BACKSPACE, SDLK_RSHIFT }, { SDLK_UP, SDLK_W },
         { SDLK_DOWN, 0 }, { SDLK_LEFT, 0 }, { SDLK_RIGHT, 0 }, { SDLK_D, 0 },
         { SDLK_C, 0 }, { SDLK_V, 0 },
+        { SDLK_V, 0 },
+        { SDLK_R, 0 }, { SDLK_F, 0 },
+        { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
     };
     static const int pad[PORT_ACT_COUNT] = {
         SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
@@ -1714,6 +1733,11 @@ static void ResetControlBindings(void) {
         SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
         SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_WEST,
         SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        SDL_GAMEPAD_BUTTON_NORTH,
+        PORT_PAD_AXIS_BASE + SDL_GAMEPAD_AXIS_RIGHT_TRIGGER * 2, SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        PORT_PAD_AXIS_BASE + SDL_GAMEPAD_AXIS_LEFT_TRIGGER * 2,
+        SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+        SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
     };
     memcpy(gPortConfig.keys, keys, sizeof(keys));
     memcpy(gPortConfig.pad, pad, sizeof(pad));
@@ -1997,7 +2021,7 @@ static void Change(int item, int dir) {
         case ITEM_CONTROLS_MENU:
             if (dir > 0) {
                 sPage = PAGE_CONTROLS;
-                sControlPad = 0;
+                sControlPad = 1;
                 sCursor = sScroll = ITEM_CONTROL_A;
             }
             break;
@@ -2045,7 +2069,10 @@ static void Change(int item, int dir) {
         case ITEM_CONTROL_A: case ITEM_CONTROL_B: case ITEM_CONTROL_L: case ITEM_CONTROL_R:
         case ITEM_CONTROL_START: case ITEM_CONTROL_SELECT: case ITEM_CONTROL_UP: case ITEM_CONTROL_DOWN:
         case ITEM_CONTROL_LEFT: case ITEM_CONTROL_RIGHT: case ITEM_CONTROL_STOCK: case ITEM_CONTROL_DODGE:
-        case ITEM_CONTROL_UNSTOCK:
+        case ITEM_CONTROL_UNSTOCK: case ITEM_CONTROL_GUARD:
+        case ITEM_CONTROL_TECHNIQUE: case ITEM_CONTROL_MOVE_MENU:
+        case ITEM_CONTROL_MODIFIER: case ITEM_CONTROL_PREV_ASSIST: case ITEM_CONTROL_NEXT_ASSIST:
+        case ITEM_CONTROL_PREV_WEAPON: case ITEM_CONTROL_NEXT_WEAPON:
             if (dir) { sControlPad = !sControlPad; sControlCapture = 0; } else sControlCapture = 1;
             break;
         case ITEM_CONTROL_RESET:
@@ -2663,7 +2690,7 @@ int PortUiHandleEvent(const void* p) {
             WizKey(key);
         return 1;
     }
-    if (sPage == PAGE_CONTROLS && sControlCapture && sCursor >= ITEM_CONTROL_A && sCursor <= ITEM_CONTROL_UNSTOCK) {
+    if (sPage == PAGE_CONTROLS && sControlCapture && sCursor >= ITEM_CONTROL_A && sCursor <= ITEM_CONTROL_NEXT_WEAPON) {
         int action = sCursor - ITEM_CONTROL_A;
         if (ev->type == SDL_EVENT_KEY_DOWN && !ev->key.repeat) {
             if (ev->key.key == SDLK_ESCAPE || ev->key.key == SDLK_AC_BACK) sControlCapture = 0;

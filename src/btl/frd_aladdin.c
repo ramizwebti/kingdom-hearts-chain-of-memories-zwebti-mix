@@ -24,7 +24,13 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 static const AnimDef sFrdAladdinAnimDefs[3] = {
     { gAladdin10Frames, gAladdin10Anims, gAladdin10Tiles, 2 },
@@ -107,6 +113,9 @@ void task_frd_aladdin_0(FrdAladdinWork* work, FrdArgs* args) {
     body->y = work->actor->y;
     body->z = -0x5000;
     body->groundZ = 0;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gAladdinPalette, sizeof(gAladdinPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdAladdinAnimDefs, &work->anim, 0, 0, work->tiles);
@@ -135,7 +144,11 @@ u8 task_frd_aladdin_1(FrdAladdinWork* work) {
 
     body = &work->body;
 
-    if (gGameState.world != WORLD_AGRABAH) {
+    if (gGameState.world != WORLD_AGRABAH
+#ifdef PLATFORM_PC
+        && !(work->mainSide && PortActionCombatRules())
+#endif
+    ) {
         return 0;
     }
 

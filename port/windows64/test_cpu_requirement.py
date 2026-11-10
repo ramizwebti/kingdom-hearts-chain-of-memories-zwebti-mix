@@ -54,7 +54,7 @@ def main():
     results=[]
     for missing in (False,True):
         name='no-sse41' if missing else 'native-cpu';host=a.work/f'{name}.exe'
-        command=flags+(['-include',str(override)] if missing else [])+[str(ROOT/'port/windows64/windows64_host.c'),'-lSDL3','-lm','-o',str(host)]
+        command=flags+(['-include',str(override)] if missing else [])+['-municode',str(ROOT/'port/windows64/windows64_host.c'),'-lws2_32','-lSDL3','-lm','-o',str(host)]
         subprocess.run(command,check=True,cwd=ROOT)
         shutil.copy2(sdl/'bin/SDL3.dll',a.work/'SDL3.dll')
         marker.write_text('stale')

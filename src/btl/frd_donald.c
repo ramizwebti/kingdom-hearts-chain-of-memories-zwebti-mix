@@ -27,6 +27,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "battle_ids.h"
 #include "card_label_data.h"
 #include "btl.h"
@@ -156,6 +159,9 @@ void task_frd_donald_0(FrdDonaldWork* work, FrdArgs* args) {
     body->y = work->actor->y;
     body->z = -0x5000;
     body->groundZ = 0;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gDonaldPalette, sizeof(gDonaldPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdDonaldAnimDefs, &work->anim, 0, 0, work->tiles);

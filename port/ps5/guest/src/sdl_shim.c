@@ -400,7 +400,16 @@ bool SDL_GetCurrentRenderOutputSize(SDL_Renderer* r, int* w, int* h) {
     return true;
 }
 bool SDL_SetRenderDrawColor(SDL_Renderer* r, Uint8 a, Uint8 b, Uint8 c, Uint8 d) { r->r = a; r->g = b; r->b = c; r->a = d; return true; }
+bool SDL_GetRenderDrawColor(SDL_Renderer* r, Uint8* a, Uint8* b, Uint8* c, Uint8* d) {
+    if (!r) return false;
+    if (a) *a = r->r;
+    if (b) *b = r->g;
+    if (c) *c = r->b;
+    if (d) *d = r->a;
+    return true;
+}
 bool SDL_SetRenderDrawBlendMode(SDL_Renderer* r, SDL_BlendMode m) { r->blend = m; return true; }
+bool SDL_GetRenderDrawBlendMode(SDL_Renderer* r, SDL_BlendMode* m) { if (!r || !m) return false; *m = r->blend; return true; }
 bool SDL_SetRenderScale(SDL_Renderer* r, float x, float y) { r->sx = x; r->sy = y; return true; }
 bool SDL_GetRenderScale(SDL_Renderer* r, float* x, float* y) { *x = r->sx; *y = r->sy; return true; }
 

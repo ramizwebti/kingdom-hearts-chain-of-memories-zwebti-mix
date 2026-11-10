@@ -28,4 +28,9 @@ with tempfile.TemporaryDirectory(prefix='rekhcom-boot-') as tmp:
     assert not marker.exists(), 'pre-renderer failure marked guest entered'
     assert run(image) == 81
     assert marker.read_bytes() == b'guest-entered\n', 'guest quit must suppress fallback'
+    unicode_folder=data/'KH COM \u00c9 \u65e5\u672c'
+    unicode_folder.mkdir()
+    unicode_image=unicode_folder/'synthetic guest.bin'
+    unicode_image.write_bytes(blob)
+    assert run(unicode_image) == 81, 'native entry must retain UTF-8 Windows arguments'
 print('Windows64 boot marker process contract passed')

@@ -26,6 +26,11 @@
 #include "types.h"
 #include "debug_text.h"
 #include "battle_ids.h"
+#ifdef PLATFORM_PC
+#include "port/port_practice.h"
+#include "enemy_types.h"
+extern void PortLog(const char* fmt,...);
+#endif
 
 static ChkBtlWork sChkBtlWork;
 
@@ -264,6 +269,31 @@ static const ChkBtlWorld sChkBtlWorlds[13] = {
 
 const char gWhitePalette[32] = "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff";
 
+static void StartSelectedBattle(void) {
+        SeedRandom(gFrameCounter);
+        gGameState.battleStage = sChkBtlWorlds[gChkBtlWork->bg].world;
+        gGameState.floor = gChkBtlWork->floor;
+        gGameState.hp = gChkBtlWork->hp;
+        gGameState.progression.maxHp = gChkBtlWork->hp;
+        gGameState.world = sChkBtlEntries[gChkBtlWork->enemy].world;
+
+        if ((GetKeysHeld() & L_BUTTON)
+#ifdef PLATFORM_PC
+            && !PortPracticeActive()
+#endif
+        ) {
+            gGameState.flags |= GAME_FLAG_FIRST_STRIKE;
+        } else {
+            gGameState.flags &= ~GAME_FLAG_FIRST_STRIKE;
+        }
+
+        if (gGameState.flags & GAME_FLAG_RIKU) {
+            InitRikuDeckForWorld(gChkBtlWork->floor);
+        }
+
+        ModeRequest(&gModeBattle, sChkBtlEntries[gChkBtlWork->enemy].battleId);
+}
+
 void mode_chkbtl_0() {
     FadeStartIn(FADE_MODE_BLACK, 8);
     SetBgMode0();
@@ -271,6 +301,9 @@ void mode_chkbtl_0() {
     EnableBg(0);
     DebugTextInit(0, 0x5400, 0x500);
     DebugTextLoadPalette(0, gWhitePalette, sizeof(gWhitePalette), 0x0F);
+#ifdef PLATFORM_PC
+    if (!PortPracticeActive()) {
+#endif
     DebugTextPrint(0, 0, 2, "\x82\x63\x82\x64\x82\x62\x82\x6a\x81\x7c\x82\x72\x82\x64\x82\x6b\x82\x64\x82\x62\x82\x73\x81\x40\x82\x61\x82\x74\x82\x73\x82\x73\x82\x6e\x82\x6d");
     DebugTextPrint(24, 32, 2, "\x82\x64\x82\x6d\x82\x6c\x81\x46");
     DebugTextPrint(24, 44, 2, "\x82\x61\x82\x66\x81\x40\x81\x46");
@@ -286,6 +319,14 @@ void mode_chkbtl_0() {
 
     DebugTextPrintNumber(62, 56, 2, gChkBtlWork->floor + 1);
     DebugTextPrintNumber(62, 68, 2, gChkBtlWork->hp);
+
+#ifdef PLATFORM_PC
+    }
+    if (PortPracticeActive()) {
+        PortPracticeEnterMenu();
+        PortLog("practice: menu frame=%u",(unsigned)gFrameCounter);
+    }
+#endif
 
     if (!(gDebugFlags & DEBUG_FLAG_CHKBTL)) {
         func_08085FB0();
@@ -309,6 +350,31 @@ void mode_chkbtl_0() {
 
 void mode_chkbtl_1() {
     s32 i;
+#ifdef PLATFORM_PC
+    if (PortPracticeActive()) {
+        u16 keys=GetKeysPressed();
+        unsigned command=PortPracticeMenuInput(
+            ((keys&DPAD_UP)?PORT_PRACTICE_UP:0)|((keys&DPAD_DOWN)?PORT_PRACTICE_DOWN:0)|
+            ((keys&(A_BUTTON|START_BUTTON))?PORT_PRACTICE_START:0)|
+            ((keys&B_BUTTON)?PORT_PRACTICE_BACK:0));
+        if(command==PORT_PRACTICE_START) {
+            gChkBtlWork->enemy=PortPracticeEntry();
+            gChkBtlWork->floor=0;gChkBtlWork->hp=560;
+            PortLog("practice: start frame=%u preset=%u entry=%d name=%s",(unsigned)gFrameCounter,
+                PortPracticeSelection(),PortPracticeEntry(),PortPracticeName());
+            PortPracticeLaunch();
+            StartSelectedBattle();
+            PortLog("practice: rules first_strike=%u hp=%u",(unsigned)((gGameState.flags&GAME_FLAG_FIRST_STRIKE)!=0),
+                (unsigned)gGameState.hp);
+        } else if(command==PORT_PRACTICE_BACK) {
+            PortLog("practice: title frame=%u",(unsigned)gFrameCounter);
+            PortPracticeLeave();
+            gDebugFlags&=~DEBUG_FLAG_CHKBTL;
+            ModeRequest(&gModeTitle,0);
+        }
+        return;
+    }
+#endif
 
     if (GetKeysRepeat() & DPAD_UP) {
         gChkBtlWork->cursor--;
@@ -434,24 +500,7 @@ void mode_chkbtl_1() {
     if (GetKeysPressed() & SELECT_BUTTON) {
         ModeRequest(&gModeDeck, 0);
     } else if (GetKeysPressed() & (A_BUTTON | START_BUTTON)) {
-        SeedRandom(gFrameCounter);
-        gGameState.battleStage = sChkBtlWorlds[gChkBtlWork->bg].world;
-        gGameState.floor = gChkBtlWork->floor;
-        gGameState.hp = gChkBtlWork->hp;
-        gGameState.progression.maxHp = gChkBtlWork->hp;
-        gGameState.world = sChkBtlEntries[gChkBtlWork->enemy].world;
-
-        if (GetKeysHeld() & L_BUTTON) {
-            gGameState.flags |= GAME_FLAG_FIRST_STRIKE;
-        } else {
-            gGameState.flags &= ~GAME_FLAG_FIRST_STRIKE;
-        }
-
-        if (gGameState.flags & GAME_FLAG_RIKU) {
-            InitRikuDeckForWorld(gChkBtlWork->floor);
-        }
-
-        ModeRequest(&gModeBattle, sChkBtlEntries[gChkBtlWork->enemy].battleId);
+        StartSelectedBattle();
     } else if (GetKeysPressed() & B_BUTTON) {
         ModeRequest(&gModeDebug, 0);
         return;
@@ -475,6 +524,17 @@ void ChkBtlSpawnEnemy() {
         pos.x = 0x15000;
         pos.y = 0x16000;
         pos.z = 0;
+#ifdef PLATFORM_PC
+        if(PortPracticeActive() && PortPracticeSelection()==0 && gBtlWork->actor) {
+            Task* task;
+            pos.x=gBtlWork->actor->x+48*256;pos.y=gBtlWork->actor->y;
+            task=TaskCreate(&gBtlWork->taskPools[0],entry->taskDesc,&pos);
+            if(task && task->work) {
+                EmyWork* enemy=task->work;
+                enemy->actor.hp=enemy->actor.maxHp=10000;
+            }
+        } else
+#endif
         TaskCreate(&gBtlWork->taskPools[0], entry->taskDesc, &pos);
     }
 }

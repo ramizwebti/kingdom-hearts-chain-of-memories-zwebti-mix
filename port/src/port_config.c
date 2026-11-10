@@ -68,6 +68,10 @@ PortConfig gPortConfig = {
         { SDLK_D, 0 },                  /* stock (L + R) */
         { SDLK_C, 0 },                  /* dodge roll */
         { SDLK_V, 0 },                  /* experimental return stocked cards */
+        { SDLK_V, 0 },                  /* action combat guard */
+        { SDLK_R, 0 },                  /* selected native technique */
+        { SDLK_F, 0 },                  /* complete move book */
+        { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
     },
     {
         SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
@@ -75,10 +79,18 @@ PortConfig gPortConfig = {
         SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
         SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_WEST,
         SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        SDL_GAMEPAD_BUTTON_NORTH,
+        PORT_PAD_AXIS_BASE + SDL_GAMEPAD_AXIS_RIGHT_TRIGGER * 2,
+        SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        PORT_PAD_AXIS_BASE + SDL_GAMEPAD_AXIS_LEFT_TRIGGER * 2,
+        SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+        SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
     },
 };
 
 #define CONFIG_VERSION PORT_ZOOM_CONFIG_VERSION
+
+int PortActionCombatRequested(void) { return gPortConfig.actionCombat != 0; }
 
 int gPortSceneFraming;
 static int sConfigVersion;
@@ -135,6 +147,7 @@ static const Key sKeys[] = {
     { "hud_size", &gPortConfig.hudSize, 0, 2 },
     { "narrow_fit", &gPortConfig.narrowFit, 1, 1 },
     { "lcd_grid", &gPortConfig.lcdGrid, 0, 100 },
+    { "action_combat", &gPortConfig.actionCombat, 0, 1 },
     { "scanlines", &gPortConfig.scanlines, 0, 100 },
     { "color_correction", &gPortConfig.colorCorrection, 0, 1 },
     { "hide_title_hint", &gPortConfig.hideTitleHint, 0, 1 },
@@ -188,6 +201,12 @@ static const Key sKeys[] = {
     BIND("down", PORT_ACT_DOWN), BIND("left", PORT_ACT_LEFT), BIND("right", PORT_ACT_RIGHT),
     BIND("stock", PORT_ACT_STOCK), BIND("dodge", PORT_ACT_DODGE),
     BIND("unstock", PORT_ACT_UNSTOCK),
+    BIND("guard", PORT_ACT_GUARD),
+    BIND("technique", PORT_ACT_TECHNIQUE),
+    BIND("move_menu", PORT_ACT_MOVE_MENU),
+    BIND("modifier", PORT_ACT_MODIFIER),
+    BIND("prev_assist", PORT_ACT_PREV_ASSIST), BIND("next_assist", PORT_ACT_NEXT_ASSIST),
+    BIND("prev_weapon", PORT_ACT_PREV_WEAPON), BIND("next_weapon", PORT_ACT_NEXT_WEAPON),
 #undef BIND
 };
 

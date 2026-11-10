@@ -26,6 +26,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
 
 static const AnimDef sSmnGenieAnimDefs[2] = {
@@ -55,6 +58,7 @@ enum SmnGenieState {
 void task_smn_genie_0(SmnGenieWork* work, SmnArgs* args) {
     BtlObj* body;
     BtlObj* actor;
+    s32 spawnX, spawnY, spawnZ;
 
     body = &work->body;
 
@@ -70,18 +74,25 @@ void task_smn_genie_0(SmnGenieWork* work, SmnArgs* args) {
         work->tiles = gRikuBtlWork->tiles;
     }
 
+    spawnX=actor->originX;spawnY=actor->originY;spawnZ=actor->originZ;
+#ifdef PLATFORM_PC
+    PortActionAssistSpawnOrigin(args->mainSide,&spawnX,&spawnY,&spawnZ);
+#endif
     if (actor->flags & BTLOBJ_FLAG_FACING_LEFT) {
         body->flags = (BTLOBJ_FLAG_FACING_LEFT | BTLOBJ_FLAG_LARGE_SHADOW);
-        body->x = actor->originX + 0x3700;
+        body->x = spawnX + 0x3700;
     } else {
         body->flags = BTLOBJ_FLAG_LARGE_SHADOW;
-        body->x = actor->originX - 0x3700;
+        body->x = spawnX - 0x3700;
     }
 
-    body->y = actor->originY;
-    body->z = actor->originZ - 0x2800;
-    body->groundZ = actor->originZ;
+    body->y = spawnY;
+    body->z = spawnZ - 0x2800;
+    body->groundZ = spawnZ;
     work->variant = args->variant;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gGeniePalette, sizeof(gGeniePalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sSmnGenieAnimDefs, &work->anim, 0, 0, work->tiles);

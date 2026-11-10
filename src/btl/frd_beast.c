@@ -24,9 +24,15 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "battle_ids.h"
 #include "engine_math.h"
 #include "btl.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 static const AnimDef sFrdBeastAnimDefs[2] = {
     { gFelosiaslangeFrames, gFelosiaslangeAnims, gFelosiaslangeTiles, 0 },
@@ -125,6 +131,9 @@ void task_frd_beast_0(FrdBeastWork* work, FrdArgs* args) {
         break;
     }
 
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gBeastPalette, sizeof(gBeastPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdBeastAnimDefs, &work->anim, 0, 0, work->tiles);
@@ -138,7 +147,11 @@ u8 task_frd_beast_1(FrdBeastWork* work) {
 
     body = &work->body;
 
-    if (gGameState.world != WORLD_HOLLOW_BASTION) {
+    if (gGameState.world != WORLD_HOLLOW_BASTION
+#ifdef PLATFORM_PC
+        && !(work->mainSide && PortActionCombatRules())
+#endif
+    ) {
         return 0;
     }
 

@@ -23,6 +23,16 @@
 #include <stddef.h>
 #include "sprite_palettes.h"
 #include "enemy_ids.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_enemy.h"
+#include "port/port_action_fx.h"
+#include "port/port.h"
+#include "system_state.h"
+#include <stdlib.h>
+static u8 UpdateActionShadow(EmyWork* work);
+static void UpdateActionShadowThreat(EmyWork* work, u8 alive);
+extern void PortLog(const char* fmt, ...);
+#endif
 
 static const AnimDef sEmy00CommonAnimDefs[3] = {
     { gEmy00L00Frames, gEmy00L00Anims, gEmy00L00Tiles, 0 },
@@ -45,7 +55,11 @@ static const EmyDef sEmy00Def = { gEmy00Palette, sEmy00CommonAnimDefs, 384, 130,
 TaskDesc gTaskDescEmy00 = {
     "task_emy_00",
     (TaskInitFunc)task_emy_00_0,
+#ifdef PLATFORM_PC
+    (TaskUpdateFunc)UpdateActionShadow,
+#else
     (TaskUpdateFunc)task_emy_00_1,
+#endif
     (TaskDrawFunc)task_emy_00_2,
     (TaskDestroyFunc)task_emy_00_3,
     sizeof(EmyWork),
@@ -234,6 +248,58 @@ u8 task_emy_00_1(EmyWork* work) {
     return alive;
 }
 
+#ifdef PLATFORM_PC
+static u8 UpdateActionShadow(EmyWork* work) {
+    BtlObj* previous;
+    BtlObj* actor = &work->actor;
+    u8 alive;
+
+    if (!PortActionShadowIndependent(actor)) {
+        PortActionFxThreat((uintptr_t)actor,0,0,0,0,0,0,0);
+        return task_emy_00_1(work);
+    }
+    /* The request was queued on an earlier tick. A new hit or status takes
+     * priority rather than being cleared by TryStartCardAction's legacy
+     * arbitration semantics on the tick the enemy accepts its action. */
+    if ((actor->flags & BTLOBJ_FLAG_CARD_ACTION_PENDING) &&
+        (actor->hp <= 0 || actor->delayedDamage != 0 ||
+         (actor->badStatus != BAD_STATUS_NONE && actor->badStatus != BAD_STATUS_CONFUSE) ||
+         (actor->flags & (BTLOBJ_FLAGS_NO_CARD_USE | BTLOBJ_FLAGS_STATUS_PENDING |
+             BTLOBJ_FLAG_HEAL_PENDING | BTLOBJ_FLAG_CARD_BREAK_PENDING |
+             BTLOBJ_FLAG_GRAVITY_PENDING | BTLOBJ_FLAG_HAZARD_PENDING |
+             BTLOBJ_FLAG_WARP_PENDING | BTLOBJ_FLAG_FREEZE_PENDING))))
+        actor->flags &= ~BTLOBJ_FLAG_CARD_ACTION_PENDING;
+    previous = BtlSetAttackSource(actor);
+    alive = task_emy_00_1(work);
+    BtlSetAttackSource(previous);
+    UpdateActionShadowThreat(work, alive);
+    return alive;
+}
+
+static void UpdateActionShadowThreat(EmyWork* work, u8 alive) {
+    BtlObj* actor = &work->actor;
+    unsigned delay = work->state == EMY00_STATE_LUNGE ? 31 :
+        work->state == EMY00_STATE_JUMP_LUNGE ? 14 : 0;
+    unsigned remaining = 0;
+    const char* trace;
+    PORT_ENV_ONCE(trace, getenv, "KHCOM_ACTION_TRACE");
+    /* EmyLungeAttack advances the timer after its real windup/attack update.
+     * Never warn from a queued request, a range query, or a damage reaction. */
+    if (alive && actor->hp > 0 && delay && work->stateTimer < delay &&
+        (actor->flags & BTLOBJ_FLAG_IN_CARD_ACTION) &&
+        !(actor->flags & (BTLOBJ_FLAG_DAMAGE_PENDING | BTLOBJ_FLAG_HURT |
+            BTLOBJ_FLAG_INTANGIBLE | BTLOBJ_FLAGS_STATUS_PENDING)) &&
+        (actor->badStatus == BAD_STATUS_NONE || actor->badStatus == BAD_STATUS_CONFUSE))
+        remaining = delay - work->stateTimer;
+    PortActionFxThreat((uintptr_t)actor, actor->x, actor->y, actor->groundZ,
+        actor->z - (actor->height + 6) * 256, remaining, delay,
+        (actor->flags & BTLOBJ_FLAG_FACING_LEFT) != 0);
+    if (remaining && work->stateTimer == 1 && trace && trace[0] && trace[0] != '0')
+        PortLog("action: threat start frame=%u ticks=%u at=%d,%d",
+            (unsigned)gFrameCounter, remaining, actor->x >> 8, actor->y >> 8);
+}
+#endif
+
 void task_emy_00_2(EmyWork* work) {
     BtlObj* act;
     u16 flags;
@@ -297,5 +363,8 @@ void task_emy_00_2(EmyWork* work) {
 }
 
 void task_emy_00_3(EmyWork* work) {
+#ifdef PLATFORM_PC
+    PortActionFxThreat((uintptr_t)&work->actor,0,0,0,0,0,0,0);
+#endif
     EmyReleaseResources(work);
 }

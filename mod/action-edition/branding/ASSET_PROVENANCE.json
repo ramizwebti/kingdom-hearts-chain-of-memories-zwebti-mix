@@ -1,0 +1,20 @@
+{
+  "project": "Kingdom Hearts Chain of Memories: Zwebti Mix",
+  "version": "0.10.1",
+  "main_logo": {
+    "file": "kingdom-hearts-chain-of-memories-zwebti-mix-logo.png",
+    "sha256": "fa757c77e6b93e12b5286bdac06fd934c4f1654b1933deaa5e6544613d31f915",
+    "dimensions": [1525, 1031],
+    "game_title_reference": "https://www.khwiki.com/images/2/2a/Kingdom_Hearts_Chain_of_Memories_Logo_KHCOM.png",
+    "user_subtitle_reference": "ChatGPT Image Nov 9, 2026, 04_04_17 PM.png",
+    "method": "Image editing composed the original game-title reference with the supplied pink subtitle and removed its surrounding fog. AI-assisted composition; not a pixel-identical reproduction."
+  },
+  "icon": {
+    "file": "kingdom-hearts-chain-of-memories-zwebti-mix-icon.png",
+    "sha256": "3f3691614487ceccbfaa42a424f3c57105027c5a65d6360553a966ed7414dc6f",
+    "dimensions": [1254, 1254],
+    "user_reference": "ChatGPT Image Nov 9, 2026, 04_10_59 PM.png",
+    "method": "Image editing cleaned the supplied pink heart onto transparency. Windows ICO and BMP are mechanical size/format exports of that master."
+  },
+  "scope": "Only this Chain of Memories project. Original references remain unchanged; no artwork from another project was used."
+}

@@ -66,3 +66,53 @@ float PortHdTextUiAdvance(SDL_Renderer* renderer, int code, float scale) {
     glyph = code > 255 ? GlyphJp(renderer, font, (uint16_t)code) : Glyph(renderer, font, code);
     return glyph ? (float)glyph->advance : 0;
 }
+
+/* The independent action HUD is a gameplay panel, so HD title/text settings
+ * must not hide its commands. Use the same embedded face and glyph cache;
+ * retain the legacy helpers above unchanged for the existing menus. */
+int PortActionTextReady(SDL_Renderer* renderer, int code, float scale) {
+    HdFont* font;
+    HdGlyph* glyph;
+    if (!renderer || scale <= 0) return 0;
+    font = FontForScale(scale, 3);
+    if (!font->font) return 0;
+    glyph = code > 255 ? GlyphJp(renderer, font, (uint16_t)code) : Glyph(renderer, font, code);
+    if (!glyph || !glyph->ready || glyph->advance <= 0) return 0;
+    if (glyph->w <= 0 || glyph->h <= 0) return 1;
+    if (!glyph->tex) return 0;
+#ifdef PORT_SDL_BRIDGE_TEXTURE_READY
+    return PortBridgeTextureReady(glyph->tex);
+#else
+    return 1;
+#endif
+}
+
+float PortActionTextAdvance(SDL_Renderer* renderer, int code, float scale) {
+    HdFont* font;
+    HdGlyph* glyph;
+    if (!renderer || scale <= 0) return 0;
+    font = FontForScale(scale, 3);
+    if (!font->font) return 0;
+    glyph = code > 255 ? GlyphJp(renderer, font, (uint16_t)code) : Glyph(renderer, font, code);
+    return glyph ? (float)glyph->advance : 0;
+}
+
+void PortActionTextGlyph(SDL_Renderer* renderer, int code, float x, float y, float scale, float cell,
+                         uint32_t face, uint32_t shadow) {
+    HdFont* font;
+    HdGlyph* glyph;
+    PortTextGlyph unit = {0};
+    float offset = SDL_max(1.0f, scale * 0.5f);
+    if (!renderer || scale <= 0) return;
+    font = FontForScale(scale, 3);
+    if (!font->font) return;
+    glyph = code > 255 ? GlyphJp(renderer, font, (uint16_t)code) : Glyph(renderer, font, code);
+    if (code > 255 && glyph) x += (cell - glyph->advance) * 0.5f;
+#ifdef PORT_HD_TEXT_SIMPLE_DRAW
+    DrawGlyph(renderer, glyph, x + offset, y + 8 * scale + offset, shadow, 255);
+    DrawGlyph(renderer, glyph, x, y + 8 * scale, face, 255);
+#else
+    DrawGlyph(renderer, glyph, x + offset, y + 8 * scale + offset, shadow, 255, &unit, 0, 0, scale);
+    DrawGlyph(renderer, glyph, x, y + 8 * scale, face, 255, &unit, 0, 0, scale);
+#endif
+}

@@ -65,6 +65,10 @@ void PortSpriteEventShadowOwner(int role);
 void PortOamSetSource(int oamIndex, int entry);
 /* The title's logo is on BG2 (title, end of the credits): with the HD title it is drawn HD (port_ppu.c). */
 void PortTitleLogoBg(int on);
+/* Optional complete title brand: keep native sprites unless the presentation
+ * image and its fade texture are ready. This never replaces the BG2 intro. */
+int PortTitleBrandUse(int riku, unsigned paletteBank);
+void PortTitleBrandStop(void);
 /* HD sprites: the ROM tiles and frame an OAM slot shows, and the part's box in
    the frame's own coordinates (before the entry's flips and affine). */
 void PortOamSetHdPart(int oamIndex, const void* tiles, const void* frame, int x, int y, int w, int h, int flags,

@@ -6,6 +6,9 @@
  * UDP currently uses the guest fallback.
  */
 #define _GNU_SOURCE
+#ifndef SDL_MAIN_HANDLED
+#define SDL_MAIN_HANDLED 1
+#endif
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "../include/port/port_audio_continuity.h"
@@ -36,6 +39,9 @@
 #endif
 #include "../include/port/port_device_profile_host.h"
 #include "../include/port/port_windows_cpu.h"
+
+#define KHCOM_PRODUCT_TITLE "Kingdom Hearts Chain of Memories: Zwebti Mix"
+#define KHCOM_PRODUCT_VERSION "0.10.1"
 
 static char sData[1024] = ".";
 static int sQuit;
@@ -441,7 +447,8 @@ static void H_set_title(const char* s) {
                     SDL_SetWindowFullscreen(sWindow, s[12] == '1') ? s[12] - '0' : -1);
         return;
     }
-    SDL_SetWindowTitle(sWindow, s);
+    if (strcmp(SDL_GetWindowTitle(sWindow), KHCOM_PRODUCT_TITLE))
+        SDL_SetWindowTitle(sWindow, KHCOM_PRODUCT_TITLE);
 }
 
 /* ---- the image ---- */
@@ -517,7 +524,7 @@ static int __attribute__((sysv_abi)) B_thread(int op, uint32_t a, uint32_t b, ui
 #define HF(name) [HF_##name] = (uint64_t)(uintptr_t)B_##name
 #define HM(name, fn) [HF_##name] = (uint64_t)(uintptr_t)B_##name
 
-int main(int argc, char** argv) {
+static int WindowsHostMain(int argc, char** argv) {
     const char* image = "guest-eu.bin";
     const char* bootStatus = NULL;
     for (int i = 1; i < argc; i++) {
@@ -594,11 +601,15 @@ int main(int argc, char** argv) {
     CrashReportNote("guest %s, %ld bytes", image, size);
     free(tmp);
 
+    SDL_SetAppMetadata(KHCOM_PRODUCT_TITLE, KHCOM_PRODUCT_VERSION, "kingdom-hearts-chain-of-memories-zwebti-mix");
+    /* SDL loads both taskbar/title-bar sizes from the executable's icon group. */
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         Log("SDL_Init: %s", SDL_GetError());
         return 4;
     }
-    sWindow = SDL_CreateWindow("Kingdom Hearts: Chain of Memories", 1280, 720,
+    sWindow = SDL_CreateWindow(KHCOM_PRODUCT_TITLE, 1280, 720,
                                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                (getenv("KHCOM_HOST_HIDDEN") ? SDL_WINDOW_HIDDEN : 0));
     sRenderer = sWindow ? SDL_CreateRenderer(sWindow, NULL) : NULL;
@@ -664,4 +675,31 @@ int main(int argc, char** argv) {
     int rc = boot(h.stackTop);
     SDL_Quit();
     return rc;
+}
+
+/* Use the native CRT entry point rather than SDL's WinMain shim. Preserve the
+ * UTF-8 argv contract that SDL_RunApp supplied, including Unicode ROM/profile
+ * paths, while keeping the game bridge and SDL runtime unchanged. */
+static char** WindowsUtf8Arguments(int argc,wchar_t** wide) {
+    char** args=calloc((size_t)argc+1,sizeof(*args));
+    if (!args) return NULL;
+    for (int i=0;i<argc;++i) {
+        int bytes=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,wide[i],-1,NULL,0,NULL,NULL);
+        args[i]=bytes>0 ? malloc((size_t)bytes) : NULL;
+        if (!args[i] || !WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,wide[i],-1,args[i],bytes,NULL,NULL)) {
+            for (int j=0;j<=i;++j) free(args[j]);
+            free(args);return NULL;
+        }
+    }
+    return args;
+}
+
+int wmain(int argc,wchar_t** wide) {
+    char** argv=WindowsUtf8Arguments(argc,wide);
+    int result;
+    if (!argv) { fputs("Could not read the Windows command line.\n",stderr);return 2; }
+    SDL_SetMainReady();
+    result=WindowsHostMain(argc,argv);
+    for (int i=0;i<argc;++i) free(argv[i]);
+    free(argv);return result;
 }

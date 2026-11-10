@@ -535,12 +535,119 @@ int PortHdTitleArtReady(float* aspect) {
     return sArt != NULL;
 }
 
+/* The complete project title belongs to presentation rather than any imported
+ * HD setting. The original logo task requests it only after the native BG2
+ * zoom/white-out reveal. Missing art never removes an original logo part. */
+static SDL_Texture *sTitleBrand, *sTitleBrandWhite;
+static SDL_FRect sTitleBrandSource;
+static int sTitleBrandTried, sTitleBrandActive, sTitleBrandRiku;
+static unsigned sTitleBrandFrame, sTitleBrandPalette;
+
+static int TitleBrandReady(void) {
+    if (!sTitleBrandTried && sRenderer) {
+        static const char asset[] = "assets/branding/kingdom-hearts-chain-of-memories-zwebti-mix-logo.png";
+        size_t size = 0;
+        void* data = PortLoadAsset(asset, &size);
+        int w = 0, h = 0, channels = 0;
+        unsigned char* pixels = NULL;
+        SDL_Surface* surface = NULL;
+        sTitleBrandTried = 1;
+        if (data && size <= 0x7FFFFFFF && stbi_info_from_memory(data, (int)size, &w, &h, &channels) &&
+            w > 0 && h > 0 && w <= 4096 && h <= 4096 && (size_t)w * h <= 4u * 1024 * 1024) {
+            pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
+        }
+        if (pixels) {
+            int x, y, left = w, top = h, right = -1, bottom = -1;
+            for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+                if (pixels[((size_t)y * w + x) * 4 + 3]) {
+                    if (x < left) left = x;
+                    if (x > right) right = x;
+                    if (y < top) top = y;
+                    if (y > bottom) bottom = y;
+                }
+            }
+            if (right >= left && bottom >= top)
+                surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
+            if (surface) {
+                size_t k;
+                sTitleBrand = SDL_CreateTextureFromSurface(sRenderer, surface);
+                for (k = 0; k < (size_t)w * h; k++)
+                    pixels[k * 4] = pixels[k * 4 + 1] = pixels[k * 4 + 2] = 255;
+                sTitleBrandWhite = SDL_CreateTextureFromSurface(sRenderer, surface);
+                SDL_DestroySurface(surface);
+                sTitleBrandSource = (SDL_FRect){ (float)left, (float)top,
+                                                 (float)(right - left + 1), (float)(bottom - top + 1) };
+            }
+        }
+        if (pixels) stbi_image_free(pixels);
+        SDL_free(data);
+        if (sTitleBrand && sTitleBrandWhite) {
+            SDL_SetTextureBlendMode(sTitleBrand, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureBlendMode(sTitleBrandWhite, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureScaleMode(sTitleBrand, (SDL_ScaleMode)PortSmoothScaleMode());
+            SDL_SetTextureScaleMode(sTitleBrandWhite, (SDL_ScaleMode)PortSmoothScaleMode());
+            PortLog("title brand: complete Chain of Memories / Zwebti Mix image loaded");
+        } else {
+            if (sTitleBrand) SDL_DestroyTexture(sTitleBrand);
+            if (sTitleBrandWhite) SDL_DestroyTexture(sTitleBrandWhite);
+            sTitleBrand = sTitleBrandWhite = NULL;
+            PortLog("title brand: image unavailable; complete original title retained");
+        }
+    }
+    return SpriteTextureReady(sTitleBrand) && SpriteTextureReady(sTitleBrandWhite);
+}
+
+int PortTitleBrandUse(int riku, unsigned paletteBank) {
+    if (!TitleBrandReady()) {
+        sTitleBrandActive = 0;
+        return 0;
+    }
+    sTitleBrandActive = 1;
+    sTitleBrandFrame = PortFrameCount();
+    sTitleBrandRiku = riku != 0;
+    sTitleBrandPalette = paletteBank & 15;
+    return 1;
+}
+
+void PortTitleBrandStop(void) { sTitleBrandActive = 0; }
+
+void PortTitleBrandDraw(SDL_Renderer* renderer, float ox, float oy, float scale) {
+    extern const unsigned char gTitleLogoKingdomHeartsPalette[];
+    SDL_FRect at;
+    float ratio, w, h, x, y;
+    int dark = 0, white = 0;
+    unsigned frame = PortFrameCount();
+    if (!renderer || scale <= 0 || !sTitleBrandActive || sTitleBrandFrame != frame ||
+        !SpriteTextureReady(sTitleBrand) || !SpriteTextureReady(sTitleBrandWhite)) return;
+    /* Fit the whole mark, including its pink subtitle, inside the original
+     * logo column. Transparent margins cannot shrink the visible lettering. */
+    ratio = SDL_min(160.0f / sTitleBrandSource.w, 110.0f / sTitleBrandSource.h);
+    w = sTitleBrandSource.w * ratio;
+    h = sTitleBrandSource.h * ratio;
+    x = (sTitleBrandRiku ? 164.0f : 80.0f) - w / 2;
+    x = SDL_clamp(x, 0.0f, 240.0f - w);
+    y = 7.0f + (110.0f - h) / 2;
+    at = (SDL_FRect){ ox + (gPortScreen.originX + x) * scale,
+                      oy + (gPortScreen.originY + y) * scale, w * scale, h * scale };
+    PortPaletteFade((const uint16_t*)gTitleLogoKingdomHeartsPalette,
+                    (const volatile uint16_t*)(uintptr_t)(GBA_PLTT + 0x200 + sTitleBrandPalette * 32),
+                    16, &dark, &white);
+    SDL_SetTextureColorMod(sTitleBrand, 255 - dark, 255 - dark, 255 - dark);
+    SDL_SetTextureAlphaMod(sTitleBrand, 255);
+    if (white < 255) SDL_RenderTexture(renderer, sTitleBrand, &sTitleBrandSource, &at);
+    SDL_SetTextureColorMod(sTitleBrandWhite, 255, 255, 255);
+    SDL_SetTextureAlphaMod(sTitleBrandWhite, white);
+    if (white) SDL_RenderTexture(renderer, sTitleBrandWhite, &sTitleBrandSource, &at);
+}
+
 /* Keep first-open decoding/upload outside a live menu frame. Shared menu
    and title assets use the existing bounded cache; cards stay on demand. */
 void PortHdMenuAssetsWarm(SDL_Renderer* renderer) {
     int i;
-    if (!gPortConfig.hdTitle || !renderer) return;
+    if (!renderer) return;
     sRenderer = renderer;
+    TitleBrandReady();
+    if (!gPortConfig.hdTitle) return;
     PortHdTitleArtReady(NULL);
     MenuLightReady(renderer);
     /* Skipping the title's intro exposes its logo parts together. Decode
@@ -1282,6 +1389,10 @@ void PortHdSpritesShutdown(void) {
     if (sArtWhite) SDL_DestroyTexture(sArtWhite);
     sArt = sArtWhite = NULL;
     sArtTried = sArtW = sArtH = sArtCount = sBarCount = 0;
+    if (sTitleBrand) SDL_DestroyTexture(sTitleBrand);
+    if (sTitleBrandWhite) SDL_DestroyTexture(sTitleBrandWhite);
+    sTitleBrand = sTitleBrandWhite = NULL;
+    sTitleBrandTried = sTitleBrandActive = 0;
     SDL_memset(sDrawCount, 0, sizeof(sDrawCount));
     sRenderer = NULL;
 }

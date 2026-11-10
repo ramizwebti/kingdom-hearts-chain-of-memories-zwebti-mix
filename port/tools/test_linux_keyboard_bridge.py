@@ -162,7 +162,7 @@ def run(out, host_source=None):
         'ACTION_BITS': game[game.index('static const uint16_t sActionBits'):game.index('static uint16_t sKeyboard')],
         'INPUT_EVENT': function(game, 'void PortInputHandleEvent('),
         'GAMEPAD_KEYS': function(game, 'static uint16_t GamepadKeys('),
-        'INPUT_KEYS': function(game, 'uint16_t PortInputKeys('),
+        'INPUT_KEYS': function(game, 'uint32_t PortInputKeys('),
     }
     code = PREAMBLE
     for marker, actual in replacements.items():

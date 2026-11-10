@@ -25,7 +25,13 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 static const AnimDef sFrdJackAnimDefs[5] = {
     { gFrdJackFrames, gFrdJackAnims, gFrdJackTiles, 0 },
@@ -113,6 +119,9 @@ void task_frd_jack_0(FrdJackWork* work, FrdArgs* args) {
     body->z = -0x5000;
     body->groundZ = 0;
     work->rotation = 0;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gJackPalette, sizeof(gJackPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdJackAnimDefs, &work->anim, 0, 0, work->tiles);
@@ -139,7 +148,11 @@ u8 task_frd_jack_1(FrdJackWork* work) {
     BtlWork* owner;
     BtlObj* target;
 
-    if (gGameState.world != WORLD_HALLOWEEN_TOWN) return 0;
+    if (gGameState.world != WORLD_HALLOWEEN_TOWN
+#ifdef PLATFORM_PC
+        && !(work->mainSide && PortActionCombatRules())
+#endif
+    ) return 0;
 
     if (work->mainSide) {
         owner = gBtlWork;

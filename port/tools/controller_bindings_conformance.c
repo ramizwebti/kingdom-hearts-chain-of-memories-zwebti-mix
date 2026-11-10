@@ -24,6 +24,9 @@ int main(void) {
     assert(gPortConfig.keys[PORT_ACT_SELECT][1] == SDLK_RSHIFT);
     assert(gPortConfig.pad[PORT_ACT_A] == SDL_GAMEPAD_BUTTON_SOUTH);
     assert(gPortConfig.pad[PORT_ACT_L] == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    assert(gPortConfig.keys[PORT_ACT_GUARD][0] == SDLK_V);
+    assert(gPortConfig.keys[PORT_ACT_GUARD][1] == 0);
+    assert(gPortConfig.pad[PORT_ACT_GUARD] == SDL_GAMEPAD_BUTTON_NORTH);
     assert(gPortConfig.padLayout == 0);
     assert(!sControlCapture && saved == 1 && inputReset == 1);
 

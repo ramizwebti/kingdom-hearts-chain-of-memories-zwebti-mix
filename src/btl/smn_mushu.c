@@ -22,6 +22,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
 
 static const AnimDef sSmnMushuAnimDefs[4] = {
@@ -79,6 +82,9 @@ void task_smn_mushu_0(SmnMushuWork* work, SmnArgs* args) {
     }
 
     work->variant = args->variant;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gMushuPalette, sizeof(gMushuPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sSmnMushuAnimDefs, &work->anim, 0, ANIM_FLAG_LOOP, work->tiles);

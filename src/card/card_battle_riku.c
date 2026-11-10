@@ -6,6 +6,7 @@
 #include "macros.h"
 #ifdef PLATFORM_PC
 #include "port/port.h"
+#include "port/port_action_game.h"
 #endif
 #include "registration_data.h"
 #include "card_battle.h"
@@ -1464,6 +1465,9 @@ static u8 cardbattle_1(CardBattleWork* work, void* task) {
 }
 
 static void cardbattle_2(CardBattleWork* work) {
+#ifdef PLATFORM_PC
+    if (PortActionCombatRules()) return;
+#endif
     if (gCardBattleState->cardsOpen && gRikuBtlWork->hcEffect != HC_EFFECT_SLEIGHTBLIND && work->stockCount != 0 && work->stockValue != 0) {
 #ifdef PLATFORM_PC
         PortHudBegin(1, -1); /* the opponent's stocked values: top-right, under its HP */
@@ -2929,6 +2933,7 @@ static void card_2_Body(CardDisplayWork* work);
 /* The opponent's deck (humanoid bosses, Leon's tutorial): bottom-right
    corner, mirroring Sora's; stocked cards follow up to the boss's HP. */
 static void card_2(CardDisplayWork* work) {
+    if (PortActionCombatRules()) return;
     PortHudBeginFollowY(1);
     card_2_Body(work);
     PortHudEnd();
@@ -3066,6 +3071,7 @@ static void NO_Card_2_Body(CardDisplayWork* work);
 
 /* The opponent's deck: bottom-right corner. */
 void NO_Card_2(CardDisplayWork* work) {
+    if (PortActionCombatRules()) return;
     PortHudBeginFollowY(1);
     NO_Card_2_Body(work);
     PortHudEnd();
@@ -3965,6 +3971,7 @@ static void Reload_Card_2_Body(CardDisplayWork* work);
 
 /* The opponent's reload card: bottom-right corner, with its deck. */
 void Reload_Card_2(CardDisplayWork* work) {
+    if (PortActionCombatRules()) return;
     PortHudBeginFollowY(1);
     Reload_Card_2_Body(work);
     PortHudEnd();

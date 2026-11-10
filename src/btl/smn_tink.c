@@ -22,6 +22,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "card_label_data.h"
 #include "btl.h"
 
@@ -60,6 +63,10 @@ enum SmnTinkState {
 void task_smn_tink_0(SmnTinkWork* work, SmnArgs* args) {
     BtlObj* body;
     BtlObj* actor;
+    s32 spawnX, spawnY, spawnZ;
+#ifdef PLATFORM_PC
+    int independent;
+#endif
     s32 healRate;
 
     body = &work->body;
@@ -76,13 +83,17 @@ void task_smn_tink_0(SmnTinkWork* work, SmnArgs* args) {
         work->tiles = gBtlWork->tiles2;
     }
 
-    body->x = actor->originX;
-    body->y = actor->originY;
-    body->z = actor->originZ - 0x3000;
+    spawnX=actor->originX;spawnY=actor->originY;spawnZ=actor->originZ;
+#ifdef PLATFORM_PC
+    independent=PortActionAssistSpawnOrigin(args->mainSide,&spawnX,&spawnY,&spawnZ);
+#endif
+    body->x = spawnX;
+    body->y = spawnY;
+    body->z = spawnZ - 0x3000;
 #ifdef VERSION_EU
     body->groundZ = 0;
 #else
-    body->groundZ = actor->originZ;
+    body->groundZ = spawnZ;
 #endif
 
     if (actor->flags & BTLOBJ_FLAG_FACING_LEFT) {
@@ -92,6 +103,9 @@ void task_smn_tink_0(SmnTinkWork* work, SmnArgs* args) {
     }
 
     work->variant = args->variant;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gTinkPalette, sizeof(gTinkPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sSmnTinkAnimDefs, &work->anim, 0, ANIM_FLAG_LOOP, work->tiles);
@@ -135,7 +149,11 @@ void task_smn_tink_0(SmnTinkWork* work, SmnArgs* args) {
 
     work->healTarget = work->actor->maxHp * healRate + work->healHp;
 
-    if (work->healTarget > work->actor->maxHp << 8) {
+    if (work->healTarget > work->actor->maxHp << 8
+#ifdef PLATFORM_PC
+        && !independent
+#endif
+    ) {
         work->healTarget = work->actor->maxHp << 8;
     }
 
@@ -170,7 +188,22 @@ u8 task_smn_tink_1(SmnTinkWork* work) {
             work->stateTimer = 0;
         }
     } else {
+#ifdef PLATFORM_PC
+        s32 previousHeal=work->healHp>>8;
+#endif
         ApproachValue(&work->healHp, work->healTarget, work->healFrames);
+#ifdef PLATFORM_PC
+        if (PortActionAssistOwnsNative(work)) {
+            unsigned hpBefore=(u16)work->actor->hp;
+            /* Healing is additive while Sora fights. Native takeover instead
+             * assigns a precomputed HP path, which would erase fresh damage. */
+            if (work->actor->hp>0) {
+                work->actor->hp+=(work->healHp>>8)-previousHeal;
+                if (work->actor->hp>work->actor->maxHp) work->actor->hp=work->actor->maxHp;
+            }
+            PortActionAssistHealed(hpBefore,(u16)work->actor->hp);
+        } else
+#endif
         work->actor->hp = work->healHp >> 8;
         work->healFrames--;
     }

@@ -25,7 +25,13 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 static const AnimDef sFrdPanAnimDefs[4] = {
     { gPeterTukiFrames, gPeterTukiAnims, gPeterTukiTiles, 0 },
@@ -93,6 +99,9 @@ void task_frd_pan_0(FrdPanWork* work, FrdArgs* args) {
     body->groundZ = 0;
     work->hoverZ = -0x2000;
     body->z = -0x2000;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gPeterPalette, sizeof(gPeterPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdPanAnimDefs, &work->anim, 0, 0, work->tiles);
@@ -169,7 +178,11 @@ u8 task_frd_pan_1(FrdPanWork* work) {
     s32 y;
     s32 z;
 
-    if (gGameState.world != WORLD_NEVER_LAND) {
+    if (gGameState.world != WORLD_NEVER_LAND
+#ifdef PLATFORM_PC
+        && !(work->mainSide && PortActionCombatRules())
+#endif
+    ) {
         return 0;
     }
 

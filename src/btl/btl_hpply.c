@@ -18,6 +18,8 @@
 #include "engine.h"
 #ifdef PLATFORM_PC
 #include "port/port.h"
+#include "port/port_action_game.h"
+#include "port/port_action_hud.h"
 #ifdef PLATFORM_PC
 #include "port/port_hdsprites.h"
 #include "port/port_hdlayout.h"
@@ -26,6 +28,64 @@
 #include <stddef.h>
 #include "sprite_palettes.h"
 #include "engine_math.h"
+#ifdef PLATFORM_PC
+#include <string.h>
+
+/* The cartridge shares Sora's sprite palette with his portrait. Its body
+ * damage flash consequently flattens the portrait into a purple silhouette.
+ * Action mode gives the portrait the same native colors under a distinct
+ * source identity, so the body can flash while the face remains readable. */
+static u16 sActionSoraPortraitPalette[16] __attribute__((aligned(4)));
+static u8 sActionSoraPortraitTiles[0x280] __attribute__((aligned(4)));
+
+static int UseActionHud(void) {
+    return PortActionCombatRules() && !(gBtlWork->flags & BTL_FLAG_TUTORIAL);
+}
+
+static const void* SoraHudTiles(void) {
+    if (!UseActionHud()) return gBtlHpSoraFaceTiles;
+    /* A distinct source identity keeps optional imported HD faces/rings from
+     * replacing the native portrait or overlapping the compact two-gauge HUD. */
+    memcpy(sActionSoraPortraitTiles, gBtlHpSoraFaceTiles, sizeof(sActionSoraPortraitTiles));
+    return sActionSoraPortraitTiles;
+}
+
+int PortActionHudHealth(int* hp, int* maxHp) {
+    BtlObj* actor;
+    if (!hp || !maxHp || !PortActionCombatActive()) return 0;
+    actor = gBtlWork->actor;
+    if (!actor || actor->maxHp <= 0) return 0;
+    *hp = actor->hp;
+    *maxHp = actor->maxHp;
+    return 1;
+}
+
+int PortActionHudCanvas(int* width, int* height, int* bottomInset) {
+    if (!width || !height || !bottomInset || !UseActionHud()) return 0;
+    if (PortPpuHudActive() && gPortHudScale>0) {
+        *width=gPortHudW; *height=gPortHudH;
+        *bottomInset=gPortConfig.cardHudRaise<0 ? 0 :
+            gPortConfig.cardHudRaise>16 ? 16 : gPortConfig.cardHudRaise;
+    } else {
+        *width=gPortScreen.wide ? gPortScreen.width : 240;
+        *height=gPortScreen.wide ? gPortScreen.height : 160;
+        *bottomInset=0;
+    }
+    return *width>=PORT_ACTION_HUD_WIDTH && *height>=PORT_ACTION_HUD_HEIGHT+*bottomInset;
+}
+
+static ObjPalette* LoadSoraHudPalette(void) {
+    ObjPalette* palette;
+    if (UseActionHud() && CanAllocObjPalette(2)) {
+        /* One extra bank for this HUD, with at least one bank left free for
+         * effects. A full pool retains the cartridge's shared-palette path. */
+        memcpy(sActionSoraPortraitPalette, gSoraPalette, sizeof(sActionSoraPortraitPalette));
+        palette = LoadObjPalette(sActionSoraPortraitPalette, sizeof(sActionSoraPortraitPalette));
+        if (palette != NULL) return palette;
+    }
+    return LoadObjPalette(gSoraPalette, sizeof(gSoraPalette));
+}
+#endif
 
 enum BtlHpplyGaugeMode {
     BTL_HPPLY_GAUGE_MODE_SINGLE,
@@ -40,8 +100,16 @@ void task_btl_hpply_0(BtlHpplyWork* work) {
         work->gfx = gBtlHpRikuFaceFrame0;
         AnimInit(&work->anim, gBtlHpRikuFaceAnims, gBtlHpRikuFaceFrames);
     } else {
+#ifdef PLATFORM_PC
+        work->palette = LoadSoraHudPalette();
+#else
         work->palette = LoadObjPalette(gSoraPalette, sizeof(gSoraPalette));
+#endif
+#ifdef PLATFORM_PC
+        work->tiles = AllocObjTiles(0x280, SoraHudTiles());
+#else
         work->tiles = AllocObjTiles(0x280, gBtlHpSoraFaceTiles);
+#endif
         work->gfx = gBtlHpSoraFaceFrame0;
         AnimInit(&work->anim, gBtlHpSoraFaceAnims, gBtlHpSoraFaceFrames);
     }
@@ -333,9 +401,11 @@ s32 task_btl_hpply_1(BtlHpplyWork* work) {
 #ifdef PLATFORM_PC
 static void task_btl_hpply_2_Body(BtlHpplyWork* work);
 
-/* Player HP gauge: top-left corner of the screen. */
+/* Only Sora's action cluster docks at the bottom right. Classic/Riku retain
+ * their authored top-left portrait and cartridge gauges. */
 void task_btl_hpply_2(BtlHpplyWork* work) {
-    PortHudBegin(-1, -1);
+    if (UseActionHud()) PortHudBegin(1, 1);
+    else PortHudBegin(-1, -1);
     task_btl_hpply_2_Body(work);
     PortHudEnd();
 }
@@ -348,6 +418,20 @@ void task_btl_hpply_2(BtlHpplyWork* work) {
     ObjAffine* affine;
 
 #ifdef PLATFORM_PC
+    if (UseActionHud()) {
+        /* The action HUD draws total HP/maxHP as one green bar and MP as one
+         * blue bar. Do not queue the cartridge's blue extra-HP tier or any
+         * imported player gauge. The portrait keeps its original animation. */
+        if (work->tiles != NULL && ((ObjTiles*)work->tiles)->src == gBtlHpSoraFaceTiles) {
+            memcpy(sActionSoraPortraitTiles, gBtlHpSoraFaceTiles, sizeof(sActionSoraPortraitTiles));
+            ((ObjTiles*)work->tiles)->src = sActionSoraPortraitTiles;
+            ((ObjTiles*)work->tiles)->sprite = NULL;
+        }
+        DrawSprite(240-PORT_ACTION_PORTRAIT_RIGHT, 160-PORT_ACTION_PORTRAIT_BOTTOM,
+                   work->gfx, work->tiles, work->palette, NULL,
+                   SPRITE_PRIORITY(1) | SPRITE_FLAG_NO_MOSAIC, 1);
+        return;
+    }
     /* HD cards: Re:CoM's HP ring around the HD face takes the place of the gauge (port_hdsprites.c); the face
        moves in so the ring and its bar fit in the corner */
     {

@@ -25,6 +25,9 @@
 #include "engine.h"
 #include "sprite_palettes.h"
 #include "card_message_data.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 void TutorialOpenMessage(u16 message) {
     gDispCnt = (gDispCnt & ~DISPCNT_MODE_MASK) | DISPCNT_MODE_1;
@@ -165,6 +168,22 @@ void task_tutorial_0(TutorialWork* work, s32 kind) {
 }
 
 s32 task_tutorial_1(TutorialWork* work) {
+#ifdef PLATFORM_PC
+    if (PortActionCombatRules()) {
+        /* Card lessons do not apply to this ruleset. Let the ordinary intro
+         * finish, then use the same terminal state as the completed lesson;
+         * ExitBattle still selects its original post-lesson story event. */
+        work->flags &= ~TUTORIAL_FLAG_SHOW_ARROW;
+        if (gBtlWork->phase == BTL_PHASE_IDLE || gBtlWork->phase == BTL_PHASE_CARD_PLAY) {
+            if (work->timer >= 30)
+                work->state = TUTORIAL_STATE_ROBE_END;
+            else
+                work->timer++;
+        }
+        if (work->state != TUTORIAL_STATE_ROBE_END && work->state != TUTORIAL_STATE_LEON_END)
+            return 1;
+    }
+#endif
     switch (work->state) {
     case TUTORIAL_STATE_WAIT:
         if (work->timer > work->count) {

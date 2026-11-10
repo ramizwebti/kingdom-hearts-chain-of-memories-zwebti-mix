@@ -32,6 +32,53 @@
 #include "sprite_palettes.h"
 #include "obj.h"
 
+#ifdef PLATFORM_PC
+#include "port/port.h"
+#include "port/port_action_motion.h"
+#include "mode.h"
+extern Mode* gCurrentMode;
+extern Mode gModeMapFld, gModeMapFix;
+
+/* Limit the action-mode traversal changes to direct player control. Door
+ * exits, room synthesis, dialogue, scripted movement and spring jumps keep
+ * their original tasks, velocities, gravity and collision handling. */
+static int ActionFieldFreeControl(void) {
+    return gPortConfig.actionCombat && gFieldState && gMapRoomState &&
+        (gCurrentMode == &gModeMapFld || gCurrentMode == &gModeMapFix) &&
+        !(gFieldState->flags & (FIELD_FLAG_FREEZE_PLAYER | FIELD_FLAG_MENU_OPEN |
+            FIELD_FLAG_ROOM_CREATE | FIELD_FLAG_AUTO_WALK | FIELD_FLAG_EXIT_ROOM | 0x4000)) &&
+        !(gMapRoomState->flags & (ROOM_FLAG_SAVE_MENU_OPEN | ROOM_FLAG_ENEMY_STRUCK |
+            ROOM_FLAG_TUTORIAL_ACTIVE));
+}
+
+static s32 ActionFieldSpeed(s32 speed, u16 held, int airborne) {
+    return PortActionApproachSpeed(speed, (held & DPAD_ANY) != 0,
+        airborne ? 512 : 716, airborne ? 64 : 192, airborne ? 96 : 256);
+}
+
+/* Optional acceptance evidence uses simulation ticks, never presentation
+ * time. Keep movement diagnostics quiet outside explicitly requested runs. */
+static void ActionFieldTrace(FldWork* work) {
+    static s32 previousSpeed = -1;
+    static u32 previousState = 0xFFFFFFFF;
+    static u8 previousAngle = 255;
+    const char* trace;
+    FldActor* actor = &gFieldState->actor;
+    PORT_ENV_ONCE(trace, getenv, "KHCOM_ACTION_TRACE");
+    if (!trace || !gPortConfig.actionCombat) return;
+    if (actor->speed != previousSpeed || work->state != previousState ||
+        actor->angle != previousAngle || PortFrameCount() % 30 == 0) {
+        PortLog("action-field: frame=%u state=%u speed=%d angle=%u at=%d,%d,%d jump=%d free=%d",
+            PortFrameCount(), (unsigned)work->state, (int)actor->speed, (unsigned)actor->angle,
+            (int)actor->fieldPosition.x, (int)actor->fieldPosition.y, (int)actor->fieldPosition.z,
+            (int)gMapRoomState->jumpGmkHeight, ActionFieldFreeControl());
+        previousSpeed = actor->speed;
+        previousState = work->state;
+        previousAngle = actor->angle;
+    }
+}
+#endif
+
 static const AnimDef sFldSoraAnimDefs[15][5] = {
     { { gSor1bb00Frames, gSor1bb00Anims, gSor1bb00Tiles, 0 }, { gSor1ff00Frames, gSor1ff00Anims, gSor1ff00Tiles, 0 }, { gSor1fl00Frames, gSor1fl00Anims, gSor1fl00Tiles, 0 }, { gSor1ll00Frames, gSor1ll00Anims, gSor1ll00Tiles, 0 }, { gSor1bl00Frames, gSor1bl00Anims, gSor1bl00Tiles, 0 } },
     { { gSor1bb01Frames, gSor1bb01Anims, gSor1bb01Tiles, 0 }, { gSor1ff01Frames, gSor1ff01Anims, gSor1ff01Tiles, 0 }, { gSor1fl01Frames, gSor1fl01Anims, gSor1fl01Tiles, 0 }, { gSor1ll01Frames, gSor1ll01Anims, gSor1ll01Tiles, 0 }, { gSor1bl01Frames, gSor1bl01Anims, gSor1bl01Tiles, 0 } },
@@ -71,6 +118,18 @@ TaskDesc gTaskDescFldSora = {
 };
 
 void FldSoraSetAngleFromDpad(FldActor* act) {
+#ifdef PLATFORM_PC
+    if (ActionFieldFreeControl()) {
+        u16 held = GetKeysHeld();
+        int x = ((held & DPAD_RIGHT) != 0) - ((held & DPAD_LEFT) != 0);
+        int y = ((held & DPAD_DOWN) != 0) - ((held & DPAD_UP) != 0);
+        /* Field angles are isometric (45/83/etc.), not battle's 32/96. */
+        if (x > 0) act->angle = y < 0 ? FLD_ANGLE_UP_RIGHT : (y > 0 ? FLD_ANGLE_DOWN_RIGHT : FLD_ANGLE_RIGHT);
+        else if (x < 0) act->angle = y < 0 ? FLD_ANGLE_UP_LEFT : (y > 0 ? FLD_ANGLE_DOWN_LEFT : FLD_ANGLE_LEFT);
+        else if (y) act->angle = y < 0 ? FLD_ANGLE_UP : FLD_ANGLE_DOWN;
+        return;
+    }
+#endif
     if ((GetKeysHeld() & DPAD_LEFT) && (GetKeysHeld() & DPAD_DOWN)) {
         act->angle = FLD_ANGLE_DOWN_LEFT;
     } else if ((GetKeysHeld() & DPAD_UP) && (GetKeysHeld() & DPAD_LEFT)) {
@@ -233,6 +292,11 @@ void FldSoraTurn(FldActor* act) {
 
     if (old != act->angle) {
         s32 speed;
+#ifdef PLATFORM_PC
+        /* Immediate steering preserves momentum instead of halving it on
+         * every small directional change (or stopping a reversal). */
+        if (ActionFieldFreeControl()) return;
+#endif
 
         if (abs((s8)GetAngleDiff(old, act->angle)) > 100) {
             speed = 0;
@@ -483,8 +547,14 @@ u8 FldSoraJump(FldWork* work, void* task) {
     s32 ny;
     s32 ground;
     FldActor* act;
+#ifdef PLATFORM_PC
+    int actionMovement;
+#endif
 
     act = &gFieldState->actor;
+#ifdef PLATFORM_PC
+    actionMovement = ActionFieldFreeControl() && !(work->flags & FLD_FLAG_NO_AIR_TURN);
+#endif
     ground = FldSoraGetGround(work);
     sx = act->fieldPosition.x;
     sy = act->fieldPosition.y;
@@ -570,7 +640,13 @@ u8 FldSoraJump(FldWork* work, void* task) {
         act->fieldPosition.x += gSineTable[act->angle] * act->speed >> 8;
         act->fieldPosition.y += -gSineTable[act->angle + 64] * act->speed >> 8;
 
-        if (work->timer > 3) {
+        if (work->timer >
+#ifdef PLATFORM_PC
+            (actionMovement && gMapRoomState->jumpGmkHeight == 0 ? 0 : 3)
+#else
+            3
+#endif
+        ) {
             work->targetZ = gMapRoomState->jumpGmkHeight;
 
             if (work->targetZ == 0) {
@@ -599,6 +675,11 @@ u8 FldSoraJump(FldWork* work, void* task) {
 
         break;
     case FLD_STATE_JUMP_RISE:
+#ifdef PLATFORM_PC
+        if (actionMovement) {
+            act->speed = ActionFieldSpeed(act->speed, GetKeysHeld(), 1);
+        } else
+#endif
         if ((GetKeysHeld() & DPAD_ANY) != 0) {
             act->speed += 17;
 
@@ -642,6 +723,11 @@ u8 FldSoraJump(FldWork* work, void* task) {
 
         break;
     case FLD_STATE_FALL:
+#ifdef PLATFORM_PC
+        if (actionMovement) {
+            act->speed = ActionFieldSpeed(act->speed, GetKeysHeld(), 1);
+        } else
+#endif
         if ((GetKeysHeld() & DPAD_ANY) != 0) {
             act->speed += 17;
 
@@ -693,7 +779,13 @@ u8 FldSoraJump(FldWork* work, void* task) {
             work->flags &= ~FLD_FLAG_NO_AIR_TURN;
             work->timer = 0;
             work->state = FLD_STATE_JUMP_START;
-        } else if (work->timer > 6) {
+        } else if (work->timer >
+#ifdef PLATFORM_PC
+            (actionMovement ? 2 : 6)
+#else
+            6
+#endif
+        ) {
             gFieldState->flags &= ~FIELD_FLAG_PLAYER_JUMPING;
             work->flags &= ~FLD_FLAG_NO_AIR_TURN;
             work->state = FLD_STATE_GROUND;
@@ -773,6 +865,9 @@ u8 FldSoraJump(FldWork* work, void* task) {
         TaskPoolUpdate(&work->tasks);
     }
 
+#ifdef PLATFORM_PC
+    ActionFieldTrace(work);
+#endif
     return 1;
 }
 
@@ -1500,12 +1595,16 @@ u8 task_fld_sora_1(FldWork* work, void* task) {
             }
 
             if ((gFieldState->flags & 0x4000) == 0 && (GetKeysHeld() & DPAD_ANY) != 0) {
-                act->speed += 128;
-                FldSoraSetAnim(work, 2, 1);
-
-                if (act->speed > 0x266) {
-                    act->speed = 0x266;
+#ifdef PLATFORM_PC
+                if (ActionFieldFreeControl()) {
+                    act->speed = ActionFieldSpeed(act->speed, GetKeysHeld(), 0);
+                } else
+#endif
+                {
+                    act->speed += 128;
+                    if (act->speed > 0x266) act->speed = 0x266;
                 }
+                FldSoraSetAnim(work, 2, 1);
 
                 if (work->anim.timer == 0) {
                     switch (work->anim.frame) {
@@ -1519,10 +1618,14 @@ u8 task_fld_sora_1(FldWork* work, void* task) {
                 }
             } else {
                 FldSoraSetAnim(work, 0, 1);
-                act->speed -= 128;
-
-                if (act->speed < 0) {
-                    act->speed = 0;
+#ifdef PLATFORM_PC
+                if (ActionFieldFreeControl()) {
+                    act->speed = ActionFieldSpeed(act->speed, 0, 0);
+                } else
+#endif
+                {
+                    act->speed -= 128;
+                    if (act->speed < 0) act->speed = 0;
                 }
             }
 
@@ -1705,6 +1808,9 @@ u8 task_fld_sora_1(FldWork* work, void* task) {
     MapSetCameraTarget(act->fieldPosition.x, act->fieldPosition.y + act->fieldPosition.z);
     work->gfx = AnimUpdate(&work->anim);
     TaskPoolUpdate(&work->tasks);
+#ifdef PLATFORM_PC
+    ActionFieldTrace(work);
+#endif
     return 1;
 }
 

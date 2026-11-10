@@ -36,6 +36,11 @@
 #include "card_label_data.h"
 #include "macros.h"
 #include "card_ids.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#include "key.h"
+#include "gba/keys.h"
+#endif
 
 static const s16 sSoraReloadChildOffsetX[4] = { 16, 29, 42, 51 };
 
@@ -174,6 +179,9 @@ static void RELOAD_CHILDREN_2_Body(ReloadChildWork* work);
 
 /* Reload cards: bottom-left corner, with the deck. */
 void RELOAD_CHILDREN_2(ReloadChildWork* work) {
+    /* No player or opponent deck/reload graphics in action combat. */
+    if (PortActionCombatRules())
+        return;
     PortHudBegin(-1, 1);
     RELOAD_CHILDREN_2_Body(work);
     PortHudEnd();
@@ -439,6 +447,9 @@ static void REV_COUNT_2_Body(RevCountWork* work);
 
 /* Deck counter: bottom-left corner, with the deck. */
 void REV_COUNT_2(RevCountWork* work) {
+    /* No player or opponent deck/reload graphics in action combat. */
+    if (PortActionCombatRules())
+        return;
     PortHudBegin(-1, 1);
     REV_COUNT_2_Body(work);
     PortHudEnd();
@@ -545,6 +556,9 @@ static void RELOAD_2_Body(ReloadWork* work);
 
 /* Reload gauge: bottom-left corner, with the deck. */
 void RELOAD_2(ReloadWork* work) {
+    /* No player or opponent deck/reload graphics in action combat. */
+    if (PortActionCombatRules())
+        return;
     PortHudBegin(-1, 1);
     RELOAD_2_Body(work);
     PortHudEnd();

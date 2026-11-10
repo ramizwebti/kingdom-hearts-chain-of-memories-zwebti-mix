@@ -24,6 +24,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
 
 static const AnimDef sSmnSimbaAnimDef = { gShinba10Frames, gShinba10Anims, gShinba10Tiles, 0 };
@@ -46,6 +49,7 @@ enum SmnSimbaState {
 void task_smn_simba_0(SmnSimbaWork* work, SmnArgs* args) {
     BtlObj* body;
     BtlObj* actor;
+    s32 spawnX, spawnY, spawnZ;
 
     body = &work->body;
 
@@ -61,10 +65,14 @@ void task_smn_simba_0(SmnSimbaWork* work, SmnArgs* args) {
         work->tiles = gRikuBtlWork->tiles;
     }
 
-    body->x = actor->originX;
-    body->y = actor->originY;
-    body->z = actor->originZ;
-    body->groundZ = actor->originZ;
+    spawnX=actor->originX;spawnY=actor->originY;spawnZ=actor->originZ;
+#ifdef PLATFORM_PC
+    PortActionAssistSpawnOrigin(args->mainSide,&spawnX,&spawnY,&spawnZ);
+#endif
+    body->x = spawnX;
+    body->y = spawnY;
+    body->z = spawnZ;
+    body->groundZ = spawnZ;
 
     if (actor->flags & BTLOBJ_FLAG_FACING_LEFT) {
         body->flags = (BTLOBJ_FLAG_FACING_LEFT | BTLOBJ_FLAG_LARGE_SHADOW);
@@ -73,6 +81,9 @@ void task_smn_simba_0(SmnSimbaWork* work, SmnArgs* args) {
     }
 
     work->variant = args->variant;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gShinbaPalette, sizeof(gShinbaPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(&sSmnSimbaAnimDef, &work->anim, 0, 0, work->tiles);

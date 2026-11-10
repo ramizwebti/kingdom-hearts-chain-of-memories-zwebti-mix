@@ -19,6 +19,9 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 TaskDesc gTaskDescBtlLockon = {
     "task_btl_lockon",
@@ -52,6 +55,10 @@ void SelectLockonTarget() {
     BtlObj* player;
     BtlObj* enemy;
     s32 minDist;
+
+#ifdef PLATFORM_PC
+    if (PortActionLockMeleeTarget()) return;
+#endif
 
     player = gBtlWork->actor;
     minDist = 0x40000;

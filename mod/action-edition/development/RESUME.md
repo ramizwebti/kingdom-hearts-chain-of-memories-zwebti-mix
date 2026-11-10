@@ -1,0 +1,29 @@
+# Kingdom Hearts Chain of Memories: Zwebti Mix — 0.10.1 checkpoint
+
+Only work in this recovered mod checkout. Never inspect/change another Kingdom Hearts project. GitHub work must use Composure; its tools remain unavailable. Read root AGENTS.md first. Combat artwork remains native. Version0.10.1 uses the supplied pink subtitle/heart references for project branding; see branding/BRAND_NOTES.md and ASSET_PROVENANCE.json.
+
+## Current branding release
+
+Version0.10.1 installed and packaged: guest `c0a02c81be4ff86301a8248574e3377a38dc8f37e5a7d5c03fddcaae2db08774`, stamped host `c76f054f9df4f926519d313bb4ab64f7fc1595fbc23e513df05535e758f25106`, unchanged shipping SDL. Runtime `build/runtime-v0101-shipping`; focused7 title/Practice/Options/Blitz/fallback checks pass. New full wordmark combines authentic game-title reference, gold Chain of Memories label and supplied pink Zwebti Mix subtitle/blossoms; pink heart is icon-only. Source references/provenance are in `mod/action-edition/branding`. Launcher, dialogs, native window metadata, Practice header and release filenames clearly identify this game.
+
+0.10→0.10.1 upgrade/idempotence passed; all16 existing profile files stayed byte-identical and0.10.0 remains installed. See `launcher/VALIDATION.md` for current evidence and `launcher/VALIDATION-0.10.0.md` for the earlier broad combat suite. Do not transfer old broad passes to the changed presentation guest. Current full-name release/source artifacts are under the chat outputs folder; no GitHub publication occurred.
+
+## Shipping behavior
+
+- Three physical normal swings precede contextual fourth-hit finishers. Direction, hold and current magic select18 native finisher/team branches. No finisher menu or favorite hotkeys. Spells weave between physical swings without resetting their count. Attack cannot restart or shorten a playing native action.
+- Controller-first bindings: South attack, East jump, West dodge, North held guard; LB/RB cycle magic; RT tap/hold casts base/RA/GA; LT modifies fourth South into elemental raid/special and RT into advanced magic. D-padLR selects14 assist families; right-stick click tap/hold selects native assist power/sequence; LT adds the three special cooperative variants. D-padUD cycles17 obtained Keyblades. Read the controller guide for all actual mappings.
+- 116 meaningful native routes:36 magic,18 finishers/team techniques,45 assist variants,17 obtained Keyblades. The124 dispatcher catalog additionally retains7 original card-reload items and1 unused duplicate Keyblade for diagnostic inventory only. Runtime catalog hook is explicitly gated to Practice +KHCOM_CATALOG_INDEX; no production menu remains.
+- Independent assist wrapper owns0xC80 tiles and native child tasks. Sora stays visible/fighting/moving/guarding/rolling; native effects and phases play. Actual shared BGFX/presentation ownership is scheduled rather than overwritten. Original takeover camera, enemy freeze and direct HP rewrites are detached-only adaptations; Tink heals incrementally, cannot revive or erase incoming damage. World-only friends work offworld for action Sora.
+- Assist gauge100 is earned by Sora contacts and precise dodge, never independent-assist hits. Queue spends gauge only after native spawn succeeds; successful release survives hit/guard/roll while unfinished charge cancels. One active assist owns resources; pending second waits. Trinity Limit waits for the assist to leave before its original team sequence. Resource/allocation waits do not spend gauge.
+- Earned gauge and selected assist/magic/Keyblade carry within the process between battles. Queues/charges do not. New process starts0; save format unchanged.
+- Original portrait/greenHP/blueMP/tiny magic mark/one gold assist gauge+family label are bottom right. Old corner is empty in all three HUD pipelines. Bounded two-slot original Wlogo native sparkle/flash accents supplement charged attacks. Native screen darkening, hit pauses and multi-hits remain. Ragnarok's close action muzzle is adjusted without moving actors/cutting charge. Shock Impact is launch+Stop, not fabricated HP damage; Aqua Splash is an elevated steerable stream.
+
+## Historical 0.10 combat release and evidence
+
+Version0.10.0 shipping guest SHA256:3ffa8e5a04013b35da0a4f39c5137821b0b522c6f5bd412ed14f0dcd9dd756ff. Unchanged Windows host SHA256:0325cfb1dab9ce50b62311d1e7cec9bc1a1e1d687a30dd9133672ae4f1395d31. Candidate runtime is build/runtime-v010-shipping. Portable guest builder and launcher/build.py remain the build path; do not package a ROM, profile, toolchain or diagnostics.
+
+102 native logic cases,4 visual cases,3 native HUD modes,124 native execution cases and11 assist probes pass on this hash. Production polling/resolve/controller tests use simulated button/axis reports; physical controllers remain unverified. Controller-route coverage proves all116 meaningful entries;100,000 pure controller invariant steps pass. Reports are named in launcher/VALIDATION.md. Ignore superseded candidate reports. Existing local install upgraded0.9→0.10 with15 profile files byte-identical and0.9 retained.
+
+Native catalog source/generator/tests are in port/tools/build_native_catalog.py, test_native_catalog.py and test_native_catalog_ui.cjs; detailed scope is NATIVE_CATALOG.md. Generated JSON/standaloneHTML are metadata-only: full authored asset/source inventory, all330 AttackDefs,165 MoveIds, state/geometry/effect references; no ROM/image bytes. Not every enemy actor task is a directly playable Sora move. Runtime execution and metadata coverage are separate claims.
+
+Full campaign progression/balance and physical-device feel remain unverified. Classic/Riku/link combat keeps its native rules. Never transfer a pass to a changed guest; inspect actual collision/status/cleanup and frame captures. Preserve profiles and immutable prior versions. Composure publishing/live updates remain unconfigured; no other Kingdom Hearts project changed.

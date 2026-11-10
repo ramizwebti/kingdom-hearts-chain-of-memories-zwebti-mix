@@ -43,6 +43,8 @@ extern const char* GetModeName(void);
 #ifdef PLATFORM_PC
 #include "port/port.h"
 #include "port/port_scene_gallery.h"
+#include "port/port_practice.h"
+#include <stdlib.h>
 #include "display.h"
 #include "m4a_song.h"
 #include "songs.h"
@@ -1084,6 +1086,14 @@ void InitSystem() {
         gChkBtlWork->hp = 560; /* the menu's maximum: tests reach the end of the battle */
         ModeRequestHeapReset(&gModeChkbtl, 0);
         gPortBattleTest = -1;
+    }
+    /* Isolated practice boot: ordinary battle initialization, no story traversal. */
+    if (PortPracticeBegin(getenv("KHCOM_PRACTICE"))) {
+        ResetGameState();
+        SetupSoraNewGame();
+        gChkBtlWork->enemy=PortPracticeEntry();
+        gChkBtlWork->bg=0;gChkBtlWork->hp=560;
+        ModeRequestHeapReset(&gModeChkbtl,0);
     }
     /* Test harness: the debug event menu, preset to one event (A starts it). */
     if (gPortEventTest >= 0) {

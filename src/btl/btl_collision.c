@@ -19,6 +19,41 @@
 #include "card_label_data.h"
 #include "enemy_ids.h"
 #include "btl_collision.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#include "port/port_action_assist.h"
+#include "port/port_action_fx.h"
+#include "port/port_action_feedback.h"
+#include "system_state.h"
+#endif
+
+#ifdef PLATFORM_PC
+static BtlObj* sExplicitAttackSource;
+static BtlWork* sActionStopBattle;
+static u32 sActionStopFrame;
+static u8 sActionStop;
+
+BtlObj* BtlSetAttackSource(BtlObj* source) {
+    BtlObj* previous = sExplicitAttackSource;
+    sExplicitAttackSource = source;
+    return previous;
+}
+
+BtlObj* BtlGetAttackSource(void) {
+    return sExplicitAttackSource;
+}
+
+u8 BtlAttackIsPlayer(void) {
+    if (sExplicitAttackSource != NULL) {
+        return sExplicitAttackSource == gBtlWork->actor;
+    }
+
+    return (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) != 0;
+}
+#define ATTACK_IS_PLAYER() BtlAttackIsPlayer()
+#else
+#define ATTACK_IS_PLAYER() ((gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) != 0)
+#endif
 
 static const BattleAttackDef sBattleAttackDefs[330] = {
     { 256, 204, 0, 3, BgFxStartRikuHit, ATTACK_FLAG_KIND_WEAPON | ATTACK_FLAG_ELEMENT_PHYSICAL },
@@ -438,6 +473,11 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
         return ATTACK_RESULT_NONE;
     }
 
+#ifdef PLATFORM_PC
+    if (sExplicitAttackSource != NULL) {
+        source = sExplicitAttackSource;
+    } else
+#endif
     if (gBtlWork->flags & BTL_FLAG_VS_BATTLE) {
         if (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) source = gBtlWork->actor;
         else source = gRikuBtlWork->actor;
@@ -567,7 +607,12 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
     }
 
     if (attack->flags & ATTACK_FLAG_ELEMENT_PHYSICAL) {
-        if (hit->flags & BTLOBJ_FLAG_GUARD_PHYSICAL) {
+        if ((hit->flags & BTLOBJ_FLAG_GUARD_PHYSICAL)
+#ifdef PLATFORM_PC
+            && !(hit==gBtlWork->actor && PortActionPlayerGuarding() &&
+                ((attack->flags & ATTACK_FLAG_KIND_MAGIC) || !PortActionGuardFaces(source->x,source->y)))
+#endif
+        ) {
             switch ((u32)hit->kind) {
             case ENEMY_BLACK_FUNGUS:
             case ENEMY_DEFENDER:
@@ -580,6 +625,12 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
                 break;
             }
 
+#ifdef PLATFORM_PC
+            if (hit==gBtlWork->actor && PortActionPlayerGuarding()) {
+                hit->invincibleTimer=0;
+                PortActionGuardBlocked((unsigned)index);
+            } else
+#endif
             hit->invincibleTimer = 30;
             CreateBtlPopTask(hit, BTL_POP_GUARD);
             BgFxStartGuard(gBtlWork->x3, gBtlWork->y3, hit->z - hit->centerHeight * 256);
@@ -687,6 +738,10 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
 
         if (scale == 0) hit->damage = ((u32)attack->power * 15) >> 6;
         else hit->damage = (((attack->power * 60) >> 8) * scale) >> 8;
+#ifdef PLATFORM_PC
+        if (source==gBtlWork->actor && PortActionCombatRules())
+            PortActionStatusContact((unsigned)index,(unsigned)hit->kind,(u16)hit->damage);
+#endif
 
         gBtlWork->pendingHitStop = (u8)attack->hitStop;
         hit->invincibleTimer = 30;
@@ -765,9 +820,51 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
     }
 
     target->flags |= BTLOBJ_FLAG_DAMAGE_PENDING;
+#ifdef PLATFORM_PC
+    if (PortActionCombatRules()) {
+        unsigned stop = (u8)attack->hitStop;
+        /* Crowd contacts share one pause: keep it short and never let the
+         * last target overwrite a stronger contact from this same frame. */
+        if (BtlGetAttackSource() == gBtlWork->actor) {
+            unsigned cap = 2;
+            if ((index>=12 && index<=65 && (index-12)%3==2) || index==85 || index==93)
+                cap=3;
+            if (PortActionPlayerFinisherActive() &&
+                !(attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON))) cap=6;
+            if (stop > cap) stop = cap;
+        }
+        if (sActionStopBattle != gBtlWork || sActionStopFrame != gFrameCounter) {
+            sActionStopBattle = gBtlWork;
+            sActionStopFrame = gFrameCounter;
+            sActionStop = 0;
+        }
+        if (stop > sActionStop) sActionStop = stop;
+        gBtlWork->pendingHitStop = sActionStop;
+    } else
+#endif
     gBtlWork->pendingHitStop = (u8)attack->hitStop;
     target->knockbackSpeed = attack->knockbackSpeed;
     target->knockbackLift = attack->knockbackLift;
+#ifdef PLATFORM_PC
+    if (BtlGetAttackSource() == gBtlWork->actor && PortActionCombatActive() &&
+        ((index >= 12 && index <= 65) || index==85 || index==93)) {
+        const PortActionState* action = PortActionGameState();
+        if (action && ((action->lastCommand >= PORT_ACTION_GROUND_1 &&
+            action->lastCommand <= PORT_ACTION_AIR_3) || action->lastCommand==PORT_ACTION_BLITZ ||
+            action->lastCommand==PORT_ACTION_SONIC_BLADE)) {
+            unsigned step = action->lastCommand==PORT_ACTION_BLITZ || action->lastCommand==PORT_ACTION_SONIC_BLADE ?
+                3 : (action->lastCommand - PORT_ACTION_GROUND_1) % 3 + 1;
+            unsigned cap = step < 3 ? 64 : 128;
+            /* Card combat expected an immediate next card after contact.
+             * With complete authored swings, that knockback put the victim
+             * outside the next blade arc. Keep the ordinary hurt/stun/block
+             * reaction and damage, with a small push for the two setup hits
+             * and a stronger third-hit launch instead of moving Sora wildly. */
+            if (target->knockbackSpeed > cap) target->knockbackSpeed = cap;
+            if (step < 3) target->knockbackLift = 0;
+        }
+    }
+#endif
 
     if (attack->flags & ATTACK_FLAG_FORWARD_KNOCKBACK) {
         if (source->flags & BTLOBJ_FLAG_FACING_LEFT) target->angle = 192;
@@ -778,6 +875,20 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
         target->angle = GetAngle(source->x, source->y, target->x, target->y);
     }
 
+#ifdef PLATFORM_PC
+    if (BtlGetAttackSource() == gBtlWork->actor && PortActionCombatRules() &&
+        target != gBtlWork->actor && target->hp > 0 && target->damage > 0) {
+        PortActionFxHit(target->x, target->y, target->z - (target->centerHeight << 8),
+                        (PortActionPlayerFinisherActive() || (attack->flags & ATTACK_FLAG_IS_SLEIGHT)) ? 2 : 1);
+        if (!(attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON)))
+            PortActionPlayerImpact((unsigned)index);
+        if (attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON))
+            PortActionAssistContact((unsigned)index,(unsigned)target->damage);
+        PortActionFeedbackHit((unsigned)target->damage);
+        if ((index >= 12 && index <= 65) || index==85 || index==93)
+            PortActionPlayerMeleeHit();
+    }
+#endif
     return ATTACK_RESULT_HIT;
 }
 
@@ -793,7 +904,7 @@ u8 TestAttackBox(s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 halfZ) {
     gBtlWork->areaHalfZ = halfZ;
 
     if (gBtlWork->flags & BTL_FLAG_VS_BATTLE) {
-        if (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+        if (ATTACK_IS_PLAYER()) {
             opponent = gRikuBtlWork->actor;
         } else {
             opponent = gBtlWork->actor;
@@ -802,7 +913,7 @@ u8 TestAttackBox(s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 halfZ) {
         if (CanAttackBoxHitBtlObj(opponent, x, y, z, halfX, halfY, halfZ)) {
             return TRUE;
         }
-    } else if (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+    } else if (ATTACK_IS_PLAYER()) {
         opponent = ListPoolFirst(&gBtlWork->pool);
 
         while (opponent != NULL) {
@@ -841,6 +952,16 @@ s32 ApplyAttackBox(s32 attack, s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 ha
     s32 result;
     s32 enemyResult;
 
+#ifdef PLATFORM_PC
+    /* Basic Keyblade swings sweep a modestly wider crowd arc. Specials keep
+     * their authored shapes, and every target still passes normal collision,
+     * immunity and hit-reaction checks. Never widen an opponent's attack. */
+    if (BtlGetAttackSource() == gBtlWork->actor && PortActionCombatRules() &&
+        attack >= 12 && attack <= 65) {
+        halfX += 6;
+        halfY += 3;
+    }
+#endif
     def = &sBattleAttackDefs[attack];
     hitCount = 0;
     blocked = FALSE;
@@ -853,7 +974,7 @@ s32 ApplyAttackBox(s32 attack, s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 ha
     gBtlWork->areaHalfZ = halfZ;
 
     if (gBtlWork->flags & BTL_FLAG_VS_BATTLE) {
-        if (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+        if (ATTACK_IS_PLAYER()) {
             opponent = gRikuBtlWork->actor;
         } else {
             opponent = gBtlWork->actor;
@@ -870,7 +991,7 @@ s32 ApplyAttackBox(s32 attack, s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 ha
 
             return result;
         }
-    } else if (gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION) {
+    } else if (ATTACK_IS_PLAYER()) {
         opponent = ListPoolFirst(&gBtlWork->pool);
         sumZ = 0;
         sumY = 0;
@@ -918,7 +1039,11 @@ s32 ApplyAttackBox(s32 attack, s32 x, s32 y, s32 z, s16 halfX, s16 halfY, s16 ha
         }
     } else {
         opponent = gBtlWork->actor;
-
+#ifdef PLATFORM_PC
+        /* Only actual attack dispatch can reward an evasion, never AI range
+         * queries through TestAttackBox. The observer does not alter damage. */
+        PortActionObserveEnemyAttack(x, y, z, halfX, halfY, halfZ);
+#endif
         if (CanAttackBoxHitBtlObj(opponent, x, y, z, halfX, halfY, halfZ)) {
             result = ResolveAttackHit(opponent, attack);
 

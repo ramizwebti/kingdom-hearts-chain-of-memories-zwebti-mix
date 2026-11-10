@@ -47,6 +47,182 @@
 #include "btl3.h"
 #include "mode_riku_tutorial.h"
 #include "sio_api.h"
+#ifdef PLATFORM_PC
+#include "port/port.h"
+#include "port/port_action_game.h"
+#include "port/port_action_motion.h"
+#include "port/port_action_fx.h"
+#include "port/port_action_feedback.h"
+#include "port/port_action_target.h"
+#include "port/port_action_catalog.h"
+#include "port/port_action_palette.h"
+#include "port/port_action_assist.h"
+#include "frd.h"
+#include "smn.h"
+#include "wlogo.h"
+#include "registration_data.h"
+#include "malloc.h"
+#include "sprites_wlogo.h"
+#include "port/port_practice.h"
+#include <stdlib.h>
+static s32 UpdateActionSora(BtlSoraWork* work);
+static PortActionState sActionState;
+static BtlSoraWork* sActionWork;
+static PortActionIntent sActionPending;
+static PortActionIntent sActionCurrent;
+static BtlObj* sActionTarget;
+static u8 sActionQueued, sActionIndependent;
+static u8 sActionFinisherAssistGain;
+static u8 sActionGuardLatched, sActionGuardDispatch;
+static u8 sActionGroundPattern, sActionSelectedKeyblade;
+static u8 sActionTraceNative, sActionTraceDone;
+static u32 sActionTraceMove,sActionTraceDoneFrame;
+static u16 sActionTraceState,sActionTraceTasks,sActionTraceBattle,sActionTraceFlags,sActionTracePhase;
+static unsigned sActionBaseTasks,sActionBaseBattle;
+static u32 sActionImpactFrame, sActionStartFrame;
+static u32 sActionSelectedMove=MOVE_BLITZ, sActionSelectedFinisher=MOVE_BLITZ;
+static u16 sActionPressedLatched, sActionDispatchPressed;
+static u16 sActionAuxPressedLatched;
+static u16 ActionDirections(u16 keys);
+static void ActionSelectMeleeTarget(BtlSoraWork* work, u16 held);
+static void ActionApproachMeleeTarget(BtlSoraWork* work);
+static BtlObj* ActionLiveMeleeTarget(void);
+
+typedef struct ActionAssistArgs {
+    TaskDesc* nativeDesc;
+    u32 move;
+    u16 variant;
+    void* tiles;
+    s32 x,y,z;
+} ActionAssistArgs;
+
+typedef struct ActionAssistWork {
+    TaskPool tasks;
+    Task* native;
+    TaskDesc* nativeDesc;
+    void* tiles;
+    u32 move,startFrame;
+    u16 variant,lastState,lastFlags;
+    u8 ownsEffect,paused;
+    s32 x,y,z;
+} ActionAssistWork;
+
+static ActionAssistWork* sActionAssist;
+static ActionAssistWork* sActionAssistSpawning;
+static TaskPool sActionCosmetics;
+static u8 sActionCosmeticsReady,sActionCosmeticCount,sActionCurrentAccent;
+static u32 sActionCosmeticFrame;
+static struct { Task* task;s32 x,y,z; } sActionCosmeticAnchors[2];
+static void ActionCosmeticCue(s32 x,s32 y,s32 z,unsigned anim);
+
+static TaskDesc* ActionAssistDesc(u32 move,u16* variant) {
+    *variant=SUMMON_LEVEL_SINGLE;
+#define ASSIST_FAMILY(base,pair,triple,desc) \
+    case base: return &desc; \
+    case pair: *variant=SUMMON_LEVEL_PAIR; return &desc; \
+    case triple: *variant=SUMMON_LEVEL_TRIPLE; return &desc
+    switch (move) {
+    ASSIST_FAMILY(MOVE_SIMBA,MOVE_PROUD_ROAR_PAIR,MOVE_PROUD_ROAR,gTaskDescSmnSimba);
+    ASSIST_FAMILY(MOVE_GENIE,MOVE_SHOWTIME_PAIR,MOVE_SHOWTIME,gTaskDescSmnGenie);
+    ASSIST_FAMILY(MOVE_BAMBI,MOVE_PARADISE_PAIR,MOVE_PARADISE,gTaskDescSmnBambi);
+    ASSIST_FAMILY(MOVE_DUMBO,MOVE_SPLASH_PAIR,MOVE_SPLASH,gTaskDescSmnDumbo);
+    ASSIST_FAMILY(MOVE_TINKER_BELL,MOVE_TWINKLE_PAIR,MOVE_TWINKLE,gTaskDescSmnTink);
+    ASSIST_FAMILY(MOVE_MUSHU,MOVE_FLARE_BREATH_PAIR,MOVE_FLARE_BREATH,gTaskDescSmnMushu);
+    ASSIST_FAMILY(MOVE_CLOUD,MOVE_CROSS_SLASH,MOVE_OMNISLASH,gTaskDescSmnCloud);
+    ASSIST_FAMILY(MOVE_GOOFY,MOVE_GOOFY_CHARGE,MOVE_GOOFY_TORNADO,gTaskDescFrdGoofy);
+    ASSIST_FAMILY(MOVE_DONALD_DUCK,MOVE_MAGIC_PAIR,MOVE_MAGIC,gTaskDescFrdDonald);
+    ASSIST_FAMILY(MOVE_ALADDIN,MOVE_SANDSTORM_PAIR,MOVE_SANDSTORM,gTaskDescFrdAladdin);
+    ASSIST_FAMILY(MOVE_ARIEL,MOVE_SPIRAL_WAVE_PAIR,MOVE_SPIRAL_WAVE,gTaskDescFrdAriel);
+    ASSIST_FAMILY(MOVE_JACK,MOVE_SURPRISE_PAIR,MOVE_SURPRISE,gTaskDescFrdJack);
+    ASSIST_FAMILY(MOVE_PETER_PAN,MOVE_HUMMINGBIRD_PAIR,MOVE_HUMMINGBIRD,gTaskDescFrdPan);
+    ASSIST_FAMILY(MOVE_THE_BEAST,MOVE_FEROCIOUS_LUNGE_PAIR,MOVE_FEROCIOUS_LUNGE,gTaskDescFrdBeast);
+    case MOVE_IDYLL_ROMP: *variant=SUMMON_LEVEL_SLEIGHT; return &gTaskDescSmnBambi;
+    case MOVE_CROSS_SLASH_PLUS: *variant=SUMMON_LEVEL_SLEIGHT; return &gTaskDescSmnCloud;
+    case MOVE_BLAZING_DONALD: *variant=SUMMON_LEVEL_SLEIGHT; return &gTaskDescFrdDonald;
+    default: break;
+    }
+#undef ASSIST_FAMILY
+    return NULL;
+}
+
+static int ActionFullNative(void) {
+    return sActionCurrent.finisher || sActionCurrent.command==PORT_ACTION_NATIVE_TECHNIQUE;
+}
+
+static int ActionQuickMagic(void) {
+    return !ActionFullNative() && sActionCurrent.command>=PORT_ACTION_FIRE &&
+        sActionCurrent.command<=PORT_ACTION_AERO;
+}
+
+static int ActionNativeEnvironmentReady(uint32_t move,int airborne) {
+    int index=PortActionCatalogFindNative(move);
+    const PortActionCatalogEntry* entry;
+    if (index<0) return 0;
+    entry=PortActionCatalogGet((unsigned)index);
+    if (airborne && !PortActionCatalogCanUseAirborne(move)) return 0;
+    if (BgFxIsActive() && PortActionCatalogUsesEffectChannel(move)) return 0;
+    /* Full native techniques also own screen fades even when their collision
+     * uses no BGFX. Start them between an assist's actual effect phases. */
+    if (sActionAssist && !(entry->flags & PORT_CATALOG_WEAPON) &&
+        (BgFxIsActive() || FadeIsActive())) return 0;
+    /* World friends share the native tiles2 reservation. A previous friend
+     * can outlive Sora's hurt reaction, so actor-idle alone is insufficient. */
+    if ((entry->flags & PORT_CATALOG_COMPANION) && (gBtlWork->flags & BTL_FLAG_SUMMON_ACTIVE)) return 0;
+    return 1;
+}
+
+static unsigned ActionAnimationTicks(const BtlSoraWork* work) {
+    unsigned frame, ticks=work->anim.timer;
+    if (!work->anim.frames) return 0;
+    for (frame=0;frame<work->anim.frame && frame<work->anim.frameCount;frame++)
+        ticks+=work->anim.frames[frame].duration;
+    return ticks;
+}
+
+static int ActionTraceEnabled(void) {
+    const char* enabled;
+    PORT_ENV_ONCE(enabled, getenv, "KHCOM_ACTION_TRACE");
+    return enabled != NULL && enabled[0] != '\0' && enabled[0] != '0';
+}
+
+static void TraceAcceptedAction(BtlSoraWork* work) {
+    BtlObj* actor = &work->actor;
+    BtlObj* target = actor->btl->actor2;
+    const char* name=PortActionGetCommand(sActionPending.command)->name;
+    if (sActionPending.command==PORT_ACTION_NATIVE_TECHNIQUE) {
+        int index=PortActionCatalogFindNative(sActionPending.nativeMove);
+        if (index>=0) name=PortActionCatalogGet((unsigned)index)->name;
+    }
+
+    if (!ActionTraceEnabled()) return;
+    PortLog("action: accepted frame=%u id=%u command=\"%s\" mp=%u combo=%u air=%u at=%d,%d,%d target=%d,%d,%d",
+            (unsigned)gFrameCounter, (unsigned)sActionPending.command,
+            name,
+            (unsigned)sActionState.mp, (unsigned)sActionPending.comboStep,
+            (unsigned)sActionPending.airborne,
+            actor->x >> 8, actor->y >> 8, actor->z >> 8,
+            target ? target->x >> 8 : 0, target ? target->y >> 8 : 0,
+            target ? target->z >> 8 : 0);
+}
+
+/* Retain each authored overhead-cast pose while compressing its charge.
+ * Animation 42 already reaches its release pose naturally at tick 14. */
+static void ActionAdvanceCastPose(BtlSoraWork* work) {
+    switch (work->stateTimer) {
+    case 4: AnimSetFrame(&work->anim, 1); break;
+    case 7: AnimSetFrame(&work->anim, 2); break;
+    case 10: AnimSetFrame(&work->anim, 3); break;
+    case 14: AnimSetFrame(&work->anim, 4); break;
+    }
+}
+
+static void TraceActionCast(BtlSoraWork* work, const char* phase) {
+    if (ActionTraceEnabled())
+        PortLog("action: cast-%s frame=%u command=%u timer=%u", phase,
+            (unsigned)gFrameCounter, (unsigned)sActionCurrent.command,
+            (unsigned)work->stateTimer);
+}
+#endif
 
 static const AnimDef sBtlSoraAnimDefs[77] = {
     { gSor1ll50Frames, gSor1ll50Anims, gSor1ll50Tiles, 0 },
@@ -179,7 +355,11 @@ static const u8 sBtlSoraSwingHitFrames[5] = {
 TaskDesc gTaskDescBtlSora = {
     "task_btl_sora",
     (TaskInitFunc)task_btl_sora_0,
+#ifdef PLATFORM_PC
+    (TaskUpdateFunc)UpdateActionSora,
+#else
     (TaskUpdateFunc)task_btl_sora_1,
+#endif
     (TaskDrawFunc)task_btl_sora_2,
     (TaskDestroyFunc)task_btl_sora_3,
     sizeof(BtlSoraWork),
@@ -394,6 +574,18 @@ void UpdateBtlSoraWalk(BtlSoraWork* work, u16 held) {
         SetBtlSoraAnimation(work, 1, 1);
     }
 
+#ifdef PLATFORM_PC
+    if (work == sActionWork && PortActionCombatActive()) {
+        PortActionMotion motion = PortActionMoveStep(work->speed, work->angle,
+                (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0, ActionDirections(held),
+                0, act->btl->hcEffect == HC_EFFECT_DASH);
+        work->speed = motion.speed;
+        work->angle = motion.angle;
+        if (motion.facingLeft) act->flags |= BTLOBJ_FLAG_FACING_LEFT;
+        else act->flags &= ~BTLOBJ_FLAG_FACING_LEFT;
+        return;
+    }
+#endif
     if (held & 0xF0) {
         if (act->btl->hcEffect == HC_EFFECT_DASH) {
             work->speed += 256;
@@ -507,7 +699,348 @@ enum BtlSoraState {
     BTL_SORA_STATE_GRAVITY_SQUASH,
     BTL_SORA_STATE_GRAVITY_HOLD,
     BTL_SORA_STATE_GRAVITY_RECOVER
+#ifdef PLATFORM_PC
+    , BTL_SORA_STATE_ACTION_GUARD
+#endif
 };
+
+#ifdef PLATFORM_PC
+static int ActionCanDefend(BtlSoraWork* work) {
+    BtlObj* act=&work->actor;
+    if (act->hp<=0 || (act->badStatus!=BAD_STATUS_NONE && act->badStatus!=BAD_STATUS_CONFUSE) ||
+        act->delayedDamage || (act->flags & ((BTLOBJ_FLAGS_NO_CARD_USE & ~BTLOBJ_FLAG_CARD_USE_BLOCKED) |
+        BTLOBJ_FLAGS_STATUS_PENDING | BTLOBJ_FLAG_CARD_BREAK_PENDING | BTLOBJ_FLAG_GRAVITY_PENDING |
+        BTLOBJ_FLAG_HAZARD_PENDING | BTLOBJ_FLAG_WARP_PENDING | BTLOBJ_FLAG_FREEZE_PENDING))) return 0;
+    if (sActionIndependent && ActionFullNative()) {
+        unsigned sinceHit=sActionImpactFrame ? gFrameCounter-sActionImpactFrame : 0;
+        if (sActionCurrent.nativeMove==MOVE_BLITZ) {
+            if (work->state!=BTL_SORA_STATE_BLITZ_STRIKE || work->comboCount ||
+                AnimGetFrame(&work->anim)<7 || (sActionImpactFrame && sinceHit<12)) return 0;
+        } else if (sActionCurrent.nativeMove==MOVE_SONIC_BLADE) {
+            if (work->state!=BTL_SORA_STATE_SONIC_BLADE || work->comboCount<6 ||
+                ActionAnimationTicks(work)<64 || (sActionImpactFrame && sinceHit<8)) return 0;
+        } else return 0;
+    }
+    return sActionIndependent || work->state==BTL_SORA_STATE_IDLE ||
+        work->state==BTL_SORA_STATE_AIRBORNE || work->state==BTL_SORA_STATE_LAND ||
+        work->state==BTL_SORA_STATE_GUARDED || work->state==BTL_SORA_STATE_ACTION_GUARD;
+}
+
+static unsigned ActionTaskCount(TaskPool* pool) {
+    ListNode* node=pool->head.activeHead;
+    unsigned count=0;
+    while (node && count<1024) { ++count;node=node->next; }
+    return count;
+}
+
+static void ActionCosmeticCue(s32 x,s32 y,s32 z,unsigned anim) {
+    WlogoNvlObjArg args;
+    Task* task;
+    unsigned index;
+    s16 screenX,screenY;
+    if (!sActionCosmeticsReady || anim>4 || sActionCosmeticFrame==gFrameCounter ||
+        !ListPoolFirstFree(&sActionCosmetics) ||
+        !CanAllocObjTiles(sizeof(gWlogoNvlSparkleTiles)/32) || !CanAllocObjPalette(1)) return;
+    for (index=0;index<2;++index)
+        if (!IsTaskActiveNamed(sActionCosmeticAnchors[index].task,gTaskDescWlogoNvlObj.name)) break;
+    if (index==2) return;
+    WorldToScreen(&screenX,&screenY,x,y,z);
+    args.x=(s32)screenX*256;args.y=(s32)screenY*256;args.animId=(s32)anim;
+    task=TaskCreate(&sActionCosmetics,&gTaskDescWlogoNvlObj,&args);
+    if (!task) return;
+    sActionCosmeticAnchors[index].task=task;
+    sActionCosmeticAnchors[index].x=x;sActionCosmeticAnchors[index].y=y;sActionCosmeticAnchors[index].z=z;
+    sActionCosmeticFrame=gFrameCounter;
+    if (ActionTraceEnabled()) PortLog("action: accent-start frame=%u move=%u anim=%u tasks=%u",
+        (unsigned)gFrameCounter,(unsigned)sActionCurrent.nativeMove,anim,ActionTaskCount(&sActionCosmetics));
+}
+
+static void ActionCosmeticsUpdate(void) {
+    unsigned index,count;
+    s16 x,y;
+    if (!sActionCosmeticsReady) return;
+    for (index=0;index<2;++index) {
+        Task* task=sActionCosmeticAnchors[index].task;
+        if (IsTaskActiveNamed(task,gTaskDescWlogoNvlObj.name)) {
+            WlogoNvlObjWork* native=task->work;
+            WorldToScreen(&x,&y,sActionCosmeticAnchors[index].x,
+                sActionCosmeticAnchors[index].y,sActionCosmeticAnchors[index].z);
+            native->x=(s32)x*256;native->y=(s32)y*256;
+        }
+    }
+    TaskPoolUpdate(&sActionCosmetics);
+    count=ActionTaskCount(&sActionCosmetics);
+    if (count!=sActionCosmeticCount && ActionTraceEnabled())
+        PortLog("action: accent-state frame=%u tasks=%u",(unsigned)gFrameCounter,count);
+    sActionCosmeticCount=(u8)count;
+}
+
+static unsigned ActionBattleTaskCount(void) {
+    return ActionTaskCount(&gBtlWork->taskPools[0])+ActionTaskCount(&gBtlWork->taskPools[1])+
+        ActionTaskCount(&gBtlWork->taskPools[2]);
+}
+
+static int ActionNeutralState(BtlSoraWork* work) {
+    return work->state==BTL_SORA_STATE_IDLE || work->state==BTL_SORA_STATE_AIRBORNE ||
+        work->state==BTL_SORA_STATE_LAND;
+}
+
+static void ActionTraceNativeState(BtlSoraWork* work) {
+    unsigned tasks,battle,flags;
+    if (!sActionTraceNative || !ActionTraceEnabled()) return;
+    tasks=ActionTaskCount(&work->tasks);battle=ActionBattleTaskCount();
+    flags=(BgFxIsActive()!=0) | ((gBtlWork->flags & BTL_FLAG_SUMMON_ACTIVE) ? 2 : 0) |
+        (FadeIsActive() ? 4 : 0);
+    if (sActionTraceState!=work->state || sActionTraceTasks!=tasks || sActionTraceBattle!=battle ||
+        sActionTraceFlags!=flags || sActionTracePhase!=work->comboCount) {
+        PortLog("action: native-state frame=%u move=%u state=%u effect=%u companion=%u fade=%u tasks=%u battle=%u timer=%u anim=%u phase=%u",
+            (unsigned)gFrameCounter,(unsigned)sActionTraceMove,(unsigned)work->state,flags&1,(flags>>1)&1,(flags>>2)&1,
+            tasks,battle,(unsigned)work->stateTimer,(unsigned)AnimGetId(&work->anim),(unsigned)work->comboCount);
+        sActionTraceState=work->state;sActionTraceTasks=tasks;sActionTraceBattle=battle;
+        sActionTraceFlags=flags;sActionTracePhase=work->comboCount;
+    }
+    if (sActionTraceDone && gFrameCounter>sActionTraceDoneFrame && !flags && tasks<=sActionBaseTasks && battle<=sActionBaseBattle) {
+        PortLog("action: native-settled frame=%u move=%u state=%u effect=0 companion=0 fade=0 tasks=%u battle=%u",(unsigned)gFrameCounter,
+            (unsigned)sActionTraceMove,(unsigned)work->state,tasks,battle);
+        sActionTraceNative=0;
+    }
+}
+
+typedef struct ActionAssistCamera {
+    s32 x,y,zoomX,zoomY,zoomScale;
+    s16 zoomSteps;
+    u8 enemiesMoving;
+} ActionAssistCamera;
+
+typedef struct ActionAssistNative {
+    unsigned state,timer;
+    AnimState* anim;
+    TaskPool* tasks;
+    BtlObj* body;
+    BtlObj** target;
+} ActionAssistNative;
+
+static ActionAssistCamera ActionAssistSaveCamera(void) {
+    ActionAssistCamera camera;
+    camera.x=gBtlWork->x2;camera.y=gBtlWork->y2;
+    camera.zoomX=gBtlWork->zoomX;camera.zoomY=gBtlWork->zoomY;
+    camera.zoomScale=gBtlWork->zoomScale;camera.zoomSteps=gBtlWork->zoomSteps;
+    camera.enemiesMoving=(gBtlWork->flags & BTL_FLAG_ENEMY_MOVE_ENABLED)!=0;
+    return camera;
+}
+
+static void ActionAssistRestoreCamera(ActionAssistCamera camera) {
+    /* The companion keeps its authored fades/shakes and every strike. Only
+     * cinematic camera takeover and Genie's global AI freeze are detached. */
+    gBtlWork->x2=camera.x;gBtlWork->y2=camera.y;
+    gBtlWork->zoomX=camera.zoomX;gBtlWork->zoomY=camera.zoomY;
+    gBtlWork->zoomScale=camera.zoomScale;gBtlWork->zoomSteps=camera.zoomSteps;
+    if (camera.enemiesMoving) gBtlWork->flags|=BTL_FLAG_ENEMY_MOVE_ENABLED;
+    else gBtlWork->flags&=~BTL_FLAG_ENEMY_MOVE_ENABLED;
+}
+
+static ActionAssistNative ActionAssistReadNative(ActionAssistWork* work) {
+    ActionAssistNative info;
+    memset(&info,0,sizeof(info));
+    if (!work->native) return info;
+#define ASSIST_NATIVE(desc,type) if (work->nativeDesc==&desc) { \
+    type* native=work->native->work;info.state=native->state;info.timer=(u16)native->stateTimer; \
+    info.anim=&native->anim;info.tasks=&native->tasks;info.body=&native->body; }
+    ASSIST_NATIVE(gTaskDescSmnSimba,SmnSimbaWork)
+    else ASSIST_NATIVE(gTaskDescSmnGenie,SmnGenieWork)
+    else ASSIST_NATIVE(gTaskDescSmnBambi,SmnBambiWork)
+    else ASSIST_NATIVE(gTaskDescSmnDumbo,SmnDumboWork)
+    else ASSIST_NATIVE(gTaskDescSmnTink,SmnTinkWork)
+    else ASSIST_NATIVE(gTaskDescSmnMushu,SmnMushuWork)
+    else ASSIST_NATIVE(gTaskDescSmnCloud,SmnCloudWork)
+    else ASSIST_NATIVE(gTaskDescFrdGoofy,FrdGoofyWork)
+    else ASSIST_NATIVE(gTaskDescFrdDonald,FrdDonaldWork)
+    else ASSIST_NATIVE(gTaskDescFrdAladdin,FrdAladdinWork)
+    else ASSIST_NATIVE(gTaskDescFrdAriel,FrdArielWork)
+    else ASSIST_NATIVE(gTaskDescFrdJack,FrdJackWork)
+    else ASSIST_NATIVE(gTaskDescFrdPan,FrdPanWork)
+    else ASSIST_NATIVE(gTaskDescFrdBeast,FrdBeastWork)
+#undef ASSIST_NATIVE
+    if (work->nativeDesc==&gTaskDescSmnGenie) info.target=&((SmnGenieWork*)work->native->work)->target;
+    else if (work->nativeDesc==&gTaskDescSmnCloud) info.target=&((SmnCloudWork*)work->native->work)->target;
+    else if (work->nativeDesc==&gTaskDescSmnBambi) info.target=&((SmnBambiWork*)work->native->work)->target;
+    return info;
+}
+
+static int ActionAssistTargetLive(BtlObj* target) {
+    BtlObj* enemy;
+    if (!target) return 0;
+    if (gBtlWork->flags & BTL_FLAG_VS_BATTLE)
+        return target==gRikuBtlWork->actor && target->hp>0;
+    /* Membership is tested before dereferencing a retained target: Sora can
+     * kill it while the independent companion is still winding up. */
+    for (enemy=ListPoolFirst(&gBtlWork->pool);enemy;enemy=ListPoolNext(&enemy->node))
+        if (enemy==target) return enemy->hp>0 && !(enemy->flags & BTLOBJ_FLAG_UNHITTABLE);
+    return 0;
+}
+
+static void ActionAssistTrace(ActionAssistWork* work) {
+    ActionAssistNative native=ActionAssistReadNative(work);
+    unsigned flags=(BgFxIsActive()!=0) | ((gBtlWork->flags & BTL_FLAG_SUMMON_ACTIVE)?2:0) |
+        (FadeIsActive()?4:0);
+    if (!ActionTraceEnabled() || !native.anim || !sActionWork) return;
+    if (work->lastState==native.state && work->lastFlags==flags &&
+        (gFrameCounter-work->startFrame)%60!=0) return;
+    PortLog("action: assist-state frame=%u move=%u variant=%u state=%u timer=%u anim=%u pose=%u tasks=%u effect=%u companion=%u fade=%u soraState=%u soraAnim=%u visible=%u hp=%u at=%d,%d,%d",
+        (unsigned)gFrameCounter,(unsigned)work->move,(unsigned)work->variant,native.state,native.timer,
+        (unsigned)AnimGetId(native.anim),(unsigned)AnimGetFrame(native.anim),ActionTaskCount(native.tasks),
+        flags&1,(flags>>1)&1,(flags>>2)&1,(unsigned)sActionWork->state,(unsigned)AnimGetId(&sActionWork->anim),
+        !(sActionWork->flags & BTL_SORA_FLAG_HIDDEN) && !(gBtlWork->flags & BTL_FLAG_PLAYER_OFFSCREEN),
+        (unsigned)sActionWork->actor.hp,native.body->x>>8,native.body->y>>8,native.body->z>>8);
+    work->lastState=(u16)native.state;work->lastFlags=(u16)flags;
+}
+
+static void ActionAssistInit(ActionAssistWork* work,const ActionAssistArgs* args) {
+    BtlSpawnArgs spawn;
+    ActionAssistCamera camera=ActionAssistSaveCamera();
+    int effectBefore=BgFxIsActive()!=0;
+    memset(work,0,sizeof(*work));
+    work->nativeDesc=args->nativeDesc;work->move=args->move;work->variant=args->variant;
+    work->tiles=args->tiles;work->x=args->x;work->y=args->y;work->z=args->z;
+    work->startFrame=gFrameCounter;work->lastState=work->lastFlags=0xFFFF;
+    TaskPoolInit(&work->tasks,1);
+    if (work->tasks.tasks) {
+        spawn.mainSide=TRUE;spawn.variant=args->variant;spawn.unk_03=0;
+        sActionAssistSpawning=work;
+        work->native=TaskCreate(&work->tasks,args->nativeDesc,&spawn);
+        sActionAssistSpawning=NULL;
+    }
+    /* Blazing Donald starts its looping flame in init, before the first
+     * update. That effect already belongs to this companion. */
+    if (!effectBefore && BgFxIsActive()) work->ownsEffect=1;
+    ActionAssistRestoreCamera(camera);
+}
+
+static u8 ActionAssistUpdate(ActionAssistWork* work) {
+    ActionAssistCamera camera=ActionAssistSaveCamera();
+    ActionAssistNative native=ActionAssistReadNative(work);
+    int effectBefore=BgFxIsActive()!=0;
+    int playerPresentation=sActionIndependent && (ActionFullNative() || ActionQuickMagic());
+    int paused;
+    if (!effectBefore) work->ownsEffect=0;
+    paused=work->native && (playerPresentation || (effectBefore && !work->ownsEffect));
+    if (paused!=work->paused && ActionTraceEnabled())
+        PortLog("action: assist-pause frame=%u move=%u paused=%u player=%u effect=%u owned=%u",
+            (unsigned)gFrameCounter,(unsigned)work->move,paused,playerPresentation,effectBefore,(unsigned)work->ownsEffect);
+    work->paused=(u8)paused;
+    if (paused) return 1;
+    if (gBtlWork->actor2 && !ActionAssistTargetLive(gBtlWork->actor2)) gBtlWork->actor2=NULL;
+    if (native.target && !ActionAssistTargetLive(*native.target)) *native.target=NULL;
+    if (work->native) {
+        TaskPoolUpdate(&work->tasks);
+        work->native=ListPoolFirst(&work->tasks.head);
+    }
+    if (!effectBefore && BgFxIsActive()) work->ownsEffect=1;
+    ActionAssistRestoreCamera(camera);
+    ActionAssistTrace(work);
+    /* A last native effect can outlive its actor. Keep the reservation until
+     * the real effect and fade complete; never truncate either with a timer. */
+    return work->native || BgFxIsActive() || FadeIsActive();
+}
+
+static void ActionAssistDraw(ActionAssistWork* work) {
+    TaskPoolDraw(&work->tasks);
+}
+
+static void ActionAssistDestroy(ActionAssistWork* work) {
+    ActionAssistCamera camera=ActionAssistSaveCamera();
+    if (work->tasks.tasks) TaskPoolDestroy(&work->tasks);
+    ActionAssistRestoreCamera(camera);
+    if (work->tiles) ReleaseObjTiles(work->tiles);
+    if (ActionTraceEnabled()) PortLog("action: assist-end frame=%u move=%u elapsed=%u effect=%u companion=%u fade=%u tiles=0",
+        (unsigned)gFrameCounter,(unsigned)work->move,(unsigned)(gFrameCounter-work->startFrame),
+        BgFxIsActive()!=0,(gBtlWork->flags & BTL_FLAG_SUMMON_ACTIVE)!=0,FadeIsActive()!=0);
+    if (sActionAssist==work) sActionAssist=NULL;
+}
+
+static TaskDesc sActionAssistDesc={"task_action_assist",(TaskInitFunc)ActionAssistInit,
+    (TaskUpdateFunc)ActionAssistUpdate,(TaskDrawFunc)ActionAssistDraw,
+    (TaskDestroyFunc)ActionAssistDestroy,sizeof(ActionAssistWork)};
+
+int PortActionAssistSupported(uint32_t move) {
+    u16 variant;
+    return ActionAssistDesc(move,&variant)!=NULL;
+}
+
+int PortActionAssistActive(void) {
+    return sActionAssist!=NULL || (gBtlWork && (gBtlWork->flags & BTL_FLAG_SUMMON_ACTIVE));
+}
+
+uint32_t PortActionAssistMove(void) {
+    return sActionAssist ? sActionAssist->move : UINT32_MAX;
+}
+
+void PortActionAssistContact(unsigned attack,unsigned damage) {
+    /* The original companion attack table occupies116..163. Sora's own
+     * weapon/spell/Trinity contacts must never be credited to an assist. */
+    if (!sActionAssist || attack<116 || attack>163 || !damage) return;
+    if (ActionTraceEnabled()) PortLog("action: assist-contact frame=%u move=%u variant=%u attack=%u damage=%u",
+        (unsigned)gFrameCounter,(unsigned)sActionAssist->move,(unsigned)sActionAssist->variant,attack,damage);
+}
+
+void PortActionAssistHealed(unsigned before,unsigned after) {
+    if (sActionAssist && after>before && ActionTraceEnabled())
+        PortLog("action: assist-heal frame=%u move=%u old=%u new=%u",
+            (unsigned)gFrameCounter,(unsigned)sActionAssist->move,before,after);
+}
+
+int PortActionAssistOwnsNative(const void* nativeWork) {
+    return (sActionAssist && sActionAssist->native && sActionAssist->native->work==nativeWork) ||
+        (sActionAssistSpawning && sActionAssistSpawning->native && sActionAssistSpawning->native->work==nativeWork);
+}
+
+void* PortActionAssistSpawnTiles(int mainSide,void* originalTiles) {
+    return mainSide && sActionAssistSpawning ? sActionAssistSpawning->tiles : originalTiles;
+}
+
+int PortActionAssistSpawnOrigin(int mainSide,int32_t* x,int32_t* y,int32_t* z) {
+    if (!mainSide || !sActionAssistSpawning) return 0;
+    *x=sActionAssistSpawning->x;*y=sActionAssistSpawning->y;*z=sActionAssistSpawning->z;
+    return 1;
+}
+
+int PortActionTryStartAssist(uint32_t move) {
+    ActionAssistArgs args;
+    Task* task;
+    BtlObj* previous;
+    void* heapProbe;
+    args.nativeDesc=ActionAssistDesc(move,&args.variant);
+    if (!args.nativeDesc) return PORT_ASSIST_INVALID;
+    if (!PortActionCombatActive() || !sActionWork || sActionWork->actor.hp<=0 ||
+        PortActionAssistActive() || BgFxIsActive() || FadeIsActive() ||
+        (sActionIndependent && (ActionFullNative() || ActionQuickMagic())) ||
+        (gBtlWork->flags & (BTL_FLAG_DISMISS_SUMMONS|BTL_FLAG_BATTLE_OVER))) return PORT_ASSIST_WAIT;
+    if (!CanAllocObjTiles(0xC80/32) || !CanAllocObjPalette(1)) return PORT_ASSIST_WAIT;
+    /* Native initializers assume their child pool exists. Check one free
+     * block large enough for the largest15-child pool and init allocations
+     * before handing any resource to those unmodified native callbacks. */
+    heapProbe=EwramAlloc(sizeof(ActionAssistWork)+args.nativeDesc->workSize+16*sizeof(Task)+1024);
+    if (!heapProbe) return PORT_ASSIST_WAIT;
+    EwramFree(heapProbe);
+    args.tiles=AllocObjTiles(0xC80,NULL);
+    if (!args.tiles) return PORT_ASSIST_WAIT;
+    args.move=move;args.x=sActionWork->actor.x;args.y=sActionWork->actor.y;
+    args.z=sActionWork->actor.groundZ;
+    previous=BtlSetAttackSource(&sActionWork->actor);
+    task=TaskCreate(&gBtlWork->taskPools[0],&sActionAssistDesc,&args);
+    BtlSetAttackSource(previous);
+    if (!task) { ReleaseObjTiles(args.tiles);return PORT_ASSIST_WAIT; }
+    if (!((ActionAssistWork*)task->work)->native) {
+        TaskKill(&gBtlWork->taskPools[0],task);return PORT_ASSIST_WAIT;
+    }
+    sActionAssist=task->work;
+    if (ActionTraceEnabled()) PortLog("action: assist-start frame=%u move=%u variant=%u soraState=%u visible=%u tiles=3200",
+        (unsigned)gFrameCounter,(unsigned)move,(unsigned)args.variant,(unsigned)sActionWork->state,
+        !(sActionWork->flags & BTL_SORA_FLAG_HIDDEN) && !(gBtlWork->flags & BTL_FLAG_PLAYER_OFFSCREEN));
+    ActionAssistTrace(sActionAssist);
+    return PORT_ASSIST_STARTED;
+}
+#endif
 
 void task_btl_sora_0(BtlSoraWork* work, BtlTaskArg* arg) {
     BtlObj* act;
@@ -673,6 +1206,46 @@ void task_btl_sora_0(BtlSoraWork* work, BtlTaskArg* arg) {
     TaskPoolInit(&work->tasks, 7);
     TaskCreate(&work->tasks, &gTaskDescBtlShadow, act);
     TaskCreate(&work->tasks, &gTaskDescBtlBadstatus, act);
+#ifdef PLATFORM_PC
+    if (act == gBtlWork->actor) {
+        u32 previousRevision=sActionState.revision;
+        u16 previousGauge=sActionState.assistGauge;
+        u8 previousFamily=sActionState.assistFamily,previousMagic=sActionState.magicIndex;
+        u8 previousKeyblade=sActionState.keybladeIndex;
+        sActionWork = work;
+        sActionAssist=sActionAssistSpawning=NULL;
+        memset(&sActionCosmetics,0,sizeof(sActionCosmetics));
+        memset(sActionCosmeticAnchors,0,sizeof(sActionCosmeticAnchors));
+        TaskPoolInit(&sActionCosmetics,2);
+        sActionCosmeticsReady=sActionCosmetics.tasks!=NULL;
+        sActionCosmeticFrame=UINT32_MAX;sActionCosmeticCount=sActionCurrentAccent=0;
+        sActionTarget = NULL;
+        sActionQueued = sActionIndependent = 0;
+        memset(&sActionCurrent, 0, sizeof(sActionCurrent));
+        PortActionReset(&sActionState);
+        /* Session resources survive short encounters. Queues, charges and
+         * every actor/action field still receive a fresh battle reset. */
+        if (previousRevision) {
+            sActionState.assistGauge=previousGauge;
+            sActionState.assistFamily=previousFamily;
+            sActionState.magicIndex=previousMagic;
+            sActionState.keybladeIndex=previousKeyblade;
+        }
+        if (ActionTraceEnabled()) PortLog("action: session frame=%u carry=%u gauge=%u family=%u magic=%u keyblade=%u queued=%u",
+            (unsigned)gFrameCounter,previousRevision!=0,(unsigned)sActionState.assistGauge,
+            (unsigned)sActionState.assistFamily,(unsigned)sActionState.magicIndex,
+            (unsigned)sActionState.keybladeIndex,(unsigned)sActionState.assistQueued);
+        PortActionSelectFinisher(&sActionState,sActionSelectedFinisher);
+        sActionImpactFrame=sActionStartFrame=0;sActionGroundPattern=2;
+        sActionPressedLatched = sActionDispatchPressed = 0;
+        sActionAuxPressedLatched=0;
+        sActionGuardLatched = sActionGuardDispatch = 0;
+        sActionTraceNative=sActionTraceDone=0;
+        PortActionFxReset();
+        PortActionFeedbackReset();
+        PortActionPaletteReset();
+    }
+#endif
 }
 
 void SetBtlSoraState(BtlSoraWork* work, u32 state) {
@@ -852,6 +1425,12 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     BtlTaskArgs args;
     BtlSpawnArgs spawn;
     BtlSpawnArgs spawn2;
+#ifdef PLATFORM_PC
+    u16 actionDodge = 0;
+    int actionMotion = work == sActionWork && PortActionCombatActive();
+    int actionCancel = 0;
+    u16 dodgeStart = actionMotion ? 1 : 4;
+#endif
 
     act = &work->actor;
 
@@ -1032,6 +1611,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         held = GetKeysHeld();
         pressed = GetKeysPressed();
 #ifdef PLATFORM_PC
+        if (actionMotion) pressed |= sActionDispatchPressed;
         {
             /* Dodge button: the second tap of a d-pad double tap. */
             u16 dodge = PortTakeDodge(held, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0);
@@ -1039,6 +1619,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             if (dodge != 0) {
                 work->tapTimers[dodge == DPAD_LEFT ? 0 : 1] = 13;
                 pressed |= dodge;
+                if (actionMotion) actionDodge = dodge;
             }
         }
 #endif
@@ -1082,7 +1663,28 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         held = SwapBtlSoraKeyBits(held, 64, 128);
         pressed = SwapBtlSoraKeyBits(pressed, 32, 16);
         pressed = SwapBtlSoraKeyBits(pressed, 64, 128);
+#ifdef PLATFORM_PC
+        actionDodge = SwapBtlSoraKeyBits(actionDodge, DPAD_LEFT, DPAD_RIGHT);
+#endif
     }
+
+#ifdef PLATFORM_PC
+    if (actionMotion && ActionCanDefend(work)) {
+        if (actionDodge) actionCancel = 1;
+        else if ((PortActionGuardHeld() || sActionGuardDispatch) &&
+            work->state!=BTL_SORA_STATE_ACTION_GUARD) actionCancel = 3;
+        else if ((pressed & B_BUTTON) && sActionIndependent &&
+            PortActionMeleeCanCancel(work->stateTimer,work->comboCount,act->z>=act->groundZ)) actionCancel = 2;
+    }
+    if (sActionQueued && (actionCancel || (actionMotion && actionDodge &&
+            (work->state == BTL_SORA_STATE_IDLE || work->state == BTL_SORA_STATE_LAND)))) {
+        /* A defensive input wins over a simultaneously buffered attack,
+         * before the engine accepts that attack or spends its resource. */
+        act->flags &= ~BTLOBJ_FLAG_CARD_ACTION_PENDING;
+        sActionQueued = 0;
+        PortActionInterrupt(&sActionState);
+    }
+#endif
 
     if (work->state != BTL_SORA_STATE_ESCAPE && (act->btl->flags & BTL_FLAG_ESCAPED)) {
         act->flags |= BTLOBJ_FLAG_IGNORE_BOUNDS;
@@ -1141,7 +1743,67 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                 move = ResolveLinkActiveCardsMove(stockMoves, LINK_SIDE_PARTNER);
             }
         } else {
-            move = ResolveActiveCardsMove(stockMoves);
+#ifdef PLATFORM_PC
+            if (sActionQueued && work == sActionWork) {
+                static const u32 moves[PORT_ACTION_COMMAND_COUNT] = {
+                    0, MOVE_KINGDOM_KEY, MOVE_KINGDOM_KEY, MOVE_KINGDOM_KEY,
+                    MOVE_KINGDOM_KEY, MOVE_KINGDOM_KEY, MOVE_KINGDOM_KEY,
+                    MOVE_SLIDING_DASH, MOVE_STRIKE_RAID, MOVE_BLITZ,
+                    MOVE_STUN_IMPACT, MOVE_SONIC_BLADE, MOVE_RAGNAROK,
+                    MOVE_FIRE, MOVE_BLIZZARD, MOVE_THUNDER, MOVE_CURE,
+                    MOVE_GRAVITY, MOVE_STOP, MOVE_AERO
+                };
+                /* The actor has accepted the action. Rejected requests never spend MP. */
+                int counter = sActionState.counterFrames && sActionPending.comboStep;
+                if (PortActionCommit(&sActionState, &sActionPending)) {
+                    if (ActionTraceEnabled() && work->state == BTL_SORA_STATE_COMBO &&
+                        !sActionPending.comboStep)
+                        PortLog("action: link frame=%u from=%u to=%u", (unsigned)gFrameCounter,
+                            (unsigned)work->comboCount, (unsigned)sActionPending.command);
+                    sActionCurrent = sActionPending;
+                    sActionCurrentAccent=sActionPending.command==PORT_ACTION_NATIVE_TECHNIQUE &&
+                        (sActionPending.finisher || sActionState.bufferedCharge>=PORT_ACTION_CHARGE_MIDDLE ||
+                         sActionState.bufferedModifier);
+                    sActionSelectedKeyblade=(u8)PortActionKeybladeMove(&sActionState);
+                    move = sActionPending.command==PORT_ACTION_NATIVE_TECHNIQUE ?
+                        sActionPending.nativeMove : (sActionPending.comboStep ? sActionSelectedKeyblade : moves[sActionPending.command]);
+                    sActionCurrent.nativeMove=move;
+                    sActionStartFrame=gFrameCounter;sActionImpactFrame=0;sActionFinisherAssistGain=0;
+                    if (ActionFullNative()) {
+                        sActionTraceNative=1;sActionTraceDone=0;sActionTraceMove=move;
+                        sActionTraceState=sActionTraceTasks=sActionTraceBattle=sActionTraceFlags=sActionTracePhase=0xffff;
+                        sActionBaseTasks=ActionTaskCount(&work->tasks);sActionBaseBattle=ActionBattleTaskCount();
+                    }
+                    sActionIndependent = 1;
+                    /* Card arbitration made its current actor unhittable. An
+                     * independent attack must remain vulnerable to already
+                     * travelling enemy projectiles and overlapping attacks. */
+                    act->flags &= ~BTLOBJ_FLAG_HIT_LOCKED;
+                    if (sActionPending.comboStep || sActionPending.finisher)
+                        ActionSelectMeleeTarget(work, sActionState.bufferedHeld);
+                    TraceAcceptedAction(work);
+                    if (sActionCurrent.finisher && ActionTraceEnabled())
+                        PortLog("action: finisher-start frame=%u command=%u move=%u",(unsigned)gFrameCounter,
+                            (unsigned)sActionCurrent.command,(unsigned)move);
+                    if (counter && ActionTraceEnabled())
+                        PortLog("action: counter frame=%u", (unsigned)gFrameCounter);
+                    if (!sActionPending.comboStep && !sActionPending.finisher)
+                        PortActionFxCue(act->x, act->y, act->z - (20 << 8),
+                            sActionPending.command >= PORT_ACTION_FIRE ? PORT_ACTION_FX_CAST : PORT_ACTION_FX_FINISHER,
+                            (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0,
+                            sActionPending.command >= PORT_ACTION_FIRE ? sActionPending.command - PORT_ACTION_FIRE : 0);
+                } else {
+                    move = MOVE_SLEIGHT_57; /* safe idle fallback, never resolve unrelated enemy cards */
+                }
+                sActionQueued = 0;
+            } else
+#endif
+            {
+#ifdef PLATFORM_PC
+                sActionIndependent = 0;
+#endif
+                move = ResolveActiveCardsMove(stockMoves);
+            }
         }
 
         if (move == MOVE_STOCK_SEQUENCE) {
@@ -1962,6 +2624,28 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             break;
         }
 
+#ifdef PLATFORM_PC
+        if (work==sActionWork && sActionIndependent && ActionFullNative() && ActionTraceEnabled())
+            PortLog("action: native-dispatch frame=%u move=%u state=%u variant=%u keyblade=%u",(unsigned)gFrameCounter,
+                (unsigned)sActionCurrent.nativeMove,(unsigned)work->state,(unsigned)work->variant[0],(unsigned)work->keyblade);
+        if (work == sActionWork && sActionIndependent && sActionCurrent.comboStep && !sActionCurrent.finisher) {
+            /* Choose the actual authored swing, including aerial finishers. */
+            work->comboCount = sActionCurrent.comboStep - 1;
+            /* The selected keyblade already supplied its authored speed and
+             * attack table in the native dispatcher above. */
+            work->attacks[0] = sActionCurrent.airborne ? &sBtlSoraAirSwing1 : &sBtlSoraSwing1;
+            work->attacks[1] = sActionCurrent.airborne ? &sBtlSoraAirSwing2 : &sBtlSoraSwing2;
+            work->attacks[2] = sActionCurrent.airborne ? &sBtlSoraAirSwing3 : &sBtlSoraSwing3;
+            if (!sActionCurrent.airborne) {
+                if (sActionCurrent.comboStep==1) sActionGroundPattern=(sActionGroundPattern+1)%3;
+                if (sActionGroundPattern==1) {
+                    work->attacks[0]=&sBtlSoraSwing2;work->attacks[1]=&sBtlSoraSwing1;
+                } else if (sActionGroundPattern==2) work->attacks[0]=&sBtlSoraSwing1Wide;
+            }
+            /* Bounded approach uses the normal solid collision correction. */
+            DisableBtlSoraPassThrough(work);
+        }
+#endif
         lockon = act->btl->actor2;
 
         if (lockon != NULL) {
@@ -2103,7 +2787,60 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         work->stateTimer = 0;
     }
 
+#ifdef PLATFORM_PC
+    if (actionCancel && ActionCanDefend(work) &&
+        !(act->btl->flags & BTL_FLAG_FIELD_HIDDEN)) {
+        if (sActionIndependent && ActionFullNative() &&
+            (sActionCurrent.nativeMove==MOVE_BLITZ || sActionCurrent.nativeMove==MOVE_SONIC_BLADE)) {
+            FadeToOriginal(FADE_MODE_BLACK,8);
+            SetBattleZoom(8,Q_8_8(1),gBtlWork->x2,gBtlWork->y2);
+        }
+        DisableBtlSoraPassThrough(work);
+        SetBtlSoraState(work, actionCancel == 1 ? BTL_SORA_STATE_DODGE :
+            actionCancel == 3 ? BTL_SORA_STATE_ACTION_GUARD : BTL_SORA_STATE_JUMP);
+        act->flags &= ~(BTLOBJ_FLAG_HIT_LOCKED | BTLOBJ_FLAG_GUARD_PHYSICAL);
+        act->originX = act->x;
+        act->originY = act->y;
+        act->originZ = act->z;
+        act->vx = act->vy = 0;
+        work->speed = 0;
+        work->vz = 0;
+        if (actionCancel == 1) {
+            if (actionDodge == DPAD_LEFT) act->flags |= BTLOBJ_FLAG_FACING_LEFT;
+            else act->flags &= ~BTLOBJ_FLAG_FACING_LEFT;
+        } else if (actionCancel == 2) {
+            m4aSongNumStart(work->groundSongs[2]);
+        }
+        sActionIndependent = 0;
+        PortActionInterrupt(&sActionState);
+        if (ActionTraceEnabled())
+            PortLog("action: cancel frame=%u kind=%s", (unsigned)gFrameCounter,
+                    actionCancel == 1 ? "dodge" : actionCancel == 3 ? "guard" : "jump");
+    }
+#endif
+
     switch (work->state) {
+#ifdef PLATFORM_PC
+    case BTL_SORA_STATE_ACTION_GUARD:
+        FocusBtlSoraCamera(work);
+        if (actionDodge || !(PortActionGuardHeld() || sActionGuardDispatch)) {
+            act->flags &= ~BTLOBJ_FLAG_GUARD_PHYSICAL;
+            SetBtlSoraState(work, act->z<act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            if (ActionTraceEnabled()) PortLog("action: guard frame=%u held=0",(unsigned)gFrameCounter);
+            break;
+        }
+        if (work->stateTimer==0) {
+            SetBtlSoraAnimation(work,49,0);
+            if (ActionTraceEnabled()) PortLog("action: guard frame=%u held=1",(unsigned)gFrameCounter);
+        }
+        if ((held & (DPAD_LEFT|DPAD_RIGHT))==DPAD_LEFT) act->flags|=BTLOBJ_FLAG_FACING_LEFT;
+        else if ((held & (DPAD_LEFT|DPAD_RIGHT))==DPAD_RIGHT) act->flags&=~BTLOBJ_FLAG_FACING_LEFT;
+        AnimSetFrame(&work->anim,1);
+        act->flags|=BTLOBJ_FLAG_GUARD_PHYSICAL;
+        work->speed=0;act->vx=act->vy=0;
+        work->stateTimer++;
+        break;
+#endif
     case BTL_SORA_STATE_ENTER:
         if ((s16)work->stateTimer == 0) {
             if (work->steps == 0) {
@@ -2257,7 +2994,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         elapsed = work->stateTimer;
 
-        if ((s16)elapsed <= 3) {
+        if ((s16)elapsed <=
+#ifdef PLATFORM_PC
+            (actionMotion ? 0 : 3)
+#else
+            3
+#endif
+        ) {
             work->stateTimer = elapsed + 1;
             break;
         }
@@ -2275,6 +3018,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         work->vz = -1344;
         act->btl->flags |= BTL_FLAG_PLAYER_AIRBORNE;
         work->speed <<= 1;
+#ifdef PLATFORM_PC
+        if (actionMotion && ActionTraceEnabled())
+            PortLog("action: jump frame=%u speed=%d", (unsigned)gFrameCounter, work->speed);
+#endif
     }
 
         break;
@@ -2301,6 +3048,19 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         if (work->vz < 0 && !(held & B_BUTTON)) {
             work->vz += 64;
         }
+
+#ifdef PLATFORM_PC
+        if (actionMotion) {
+            PortActionMotion motion = PortActionMoveStep(work->speed, work->angle,
+                    (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0, ActionDirections(held), 1, 0);
+            work->speed = motion.speed;
+            work->angle = motion.angle;
+            if (motion.facingLeft) act->flags |= BTLOBJ_FLAG_FACING_LEFT;
+            else act->flags &= ~BTLOBJ_FLAG_FACING_LEFT;
+            work->stateTimer++;
+            break;
+        }
+#endif
 
         if (((s16)held & (DPAD_RIGHT | DPAD_UP)) == (DPAD_RIGHT | DPAD_UP)) {
             if (work->angle != 32) {
@@ -2384,6 +3144,9 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         if (timer == 0) {
             m4aSongNumStart(work->groundSongs[3]);
+#ifdef PLATFORM_PC
+            if (!actionMotion)
+#endif
             work->speed = 0;
             SetBtlSoraDirAnimation(work, 5, 0);
             gBtlWork->flags |= BTL_FLAG_JUMP_LANDED;
@@ -2438,7 +3201,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         elapsed = work->stateTimer;
 
-        if ((s16)elapsed <= 6) {
+        if ((s16)elapsed <=
+#ifdef PLATFORM_PC
+            (actionMotion ? 1 : 6)
+#else
+            6
+#endif
+        ) {
             work->stateTimer = elapsed + 1;
             break;
         }
@@ -2515,13 +3284,31 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             work->unk_194 = 1664;
             SetBtlSoraAnimation(work, 53, 0);
             work->steps = 32;
+#ifdef PLATFORM_PC
+            if (actionMotion) {
+                work->unk_194 = PORT_ACTION_DODGE_SPEED;
+                work->steps = PORT_ACTION_DODGE_TICKS;
+                PortActionBeginDodge(&sActionState);
+                PortActionFxCue(act->x, act->y, act->z - (12 << 8),
+                    PORT_ACTION_FX_DODGE, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0, 0);
+                if (ActionTraceEnabled())
+                    PortLog("action: dodge frame=%u direction=%s", (unsigned)gFrameCounter,
+                            (act->flags & BTLOBJ_FLAG_FACING_LEFT) ? "left" : "right");
+            }
+#endif
 
             if (work->state != BTL_SORA_STATE_SUMMON_DODGE) {
                 act->flags |= BTLOBJ_FLAG_CARD_USE_BLOCKED;
             }
         }
 
-        if ((s16)work->stateTimer == 4) {
+        if ((s16)work->stateTimer ==
+#ifdef PLATFORM_PC
+            dodgeStart
+#else
+            4
+#endif
+        ) {
             EnableBtlSoraPassThrough(work);
 
             if (work->state != BTL_SORA_STATE_SUMMON_DODGE) {
@@ -2530,7 +3317,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
             work->vz = -460;
             m4aSongNumStart(SONG_VO_SR_ATTACK09);
-        } else if ((s16)work->stateTimer > 4 && work->steps != 0) {
+        } else if ((s16)work->stateTimer >
+#ifdef PLATFORM_PC
+            dodgeStart
+#else
+            4
+#endif
+            && work->steps != 0) {
             if (act->flags & BTLOBJ_FLAG_FACING_LEFT) {
                 act->x -= work->unk_194;
             } else {
@@ -2539,6 +3332,12 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
             ApproachValue(&work->unk_194, 0, work->steps);
             work->steps--;
+#ifdef PLATFORM_PC
+            if (actionMotion && work->steps <= PORT_ACTION_DODGE_VULNERABLE_TICKS) {
+                DisableBtlSoraPassThrough(work);
+                act->flags &= ~BTLOBJ_FLAG_HIT_LOCKED;
+            }
+#endif
 
             if (act->z < act->groundZ) {
                 if (held & DPAD_UP) {
@@ -2565,7 +3364,17 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
         }
 
-        if (AnimIsFinished(&work->anim)) {
+        if (AnimIsFinished(&work->anim)
+#ifdef PLATFORM_PC
+            || (actionMotion && work->stateTimer > dodgeStart && work->steps == 0)
+#endif
+        ) {
+#ifdef PLATFORM_PC
+            if (actionMotion) {
+                DisableBtlSoraPassThrough(work);
+                act->flags &= ~BTLOBJ_FLAG_HIT_LOCKED;
+            }
+#endif
             if (work->state == BTL_SORA_STATE_SUMMON_DODGE) {
                 work->state = BTL_SORA_STATE_SUMMON_IDLE;
                 work->steps = 0;
@@ -2601,7 +3410,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         break;
     case BTL_SORA_STATE_CURE:
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -2611,7 +3424,14 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         if ((s16)work->stateTimer == 0) {
             SetBtlSoraAnimation(work, 44, 0);
             m4aSongNumStart(SONG_VO_SR_CAREL00);
-        } else if ((s16)work->stateTimer == 27) {
+        }
+#ifdef PLATFORM_PC
+        if (timer == 14) ActionAdvanceCastPose(work);
+#endif
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             switch (work->variant[0]) {
             case SPELL_TIER_BASE:
                 BgFxStartCure(SPELL_TIER_BASE, act->x, act->y, act->z - 11264);
@@ -2629,7 +3449,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             SetBtlSoraAnimation(work, 1, 1);
         }
 
-        if ((s16)work->stateTimer > 27 && !BgFxIsActive()) {
+        /* An action Cure heals on release, once, before its six-tick recovery.
+         * The original card action still waits for its presentation to end. */
+        if ((timer == 14 && (s16)work->stateTimer == timer) ||
+            (timer == 27 && (s16)work->stateTimer > timer && !BgFxIsActive())) {
             switch (act->btl->hcEffect) {
             case HC_EFFECT_CURE_BOOST:
                 switch (work->variant[0]) {
@@ -2680,10 +3503,21 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
 
             CreateBtlPopTask(act, BTL_POP_RECOVER);
-            SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
-            break;
+            if (timer == 27) {
+                SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
+                break;
+            }
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         work->stateTimer++;
         break;
     case BTL_SORA_STATE_STOP: {
@@ -2691,7 +3525,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         s32 y;
         s32 z;
 
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 25;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -2701,8 +3539,15 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         if ((s16)work->stateTimer == 0) {
             SetBtlSoraAnimation(work, 44, 0);
             m4aSongNumStart(SONG_VO_SR_STOP00);
-            FadeStartOut(FADE_MODE_GRAY, 8);
-        } else if ((s16)work->stateTimer == 25) {
+            if (timer == 25) FadeStartOut(FADE_MODE_GRAY, 8);
+        }
+#ifdef PLATFORM_PC
+        if (timer == 14) ActionAdvanceCastPose(work);
+#endif
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             if (act->btl->actor2 != NULL) {
                 enemy = act->btl->actor2;
                 x = enemy->x;
@@ -2737,7 +3582,16 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             SetBtlSoraAnimation(work, 1, 1);
         }
 
-        if ((s16)work->stateTimer > 25 && !BgFxIsActive()) {
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
+        if (timer == 25 && (s16)work->stateTimer > timer && !BgFxIsActive()) {
             FadeStartIn(FADE_MODE_GRAY, 8);
             SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
         } else {
@@ -2836,6 +3690,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         FocusBtlSoraCameraOnTarget(work);
         memcpy(hitFrames, sBtlSoraSwingHitFrames, sizeof(hitFrames));
 
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && sActionCurrent.comboStep) {
+            swing = work->attacks[work->comboCount];
+        } else
+#endif
         if (act->btl->hcEffect == HC_EFFECT_COMBO_PLUS) {
             if ((work->flags & BTL_SORA_FLAG_COMBO_EXTENDED) == 0) {
                 if (work->comboCount == 2) {
@@ -2855,7 +3714,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             swing = work->attacks[work->comboCount];
         }
 
-        if (work->comboCount != 0) {
+        if (work->comboCount != 0
+#ifdef PLATFORM_PC
+            && !(actionMotion && sActionIndependent && sActionCurrent.comboStep)
+#endif
+        ) {
             if (swing->flags & COMBO_FLAG_AERIAL_SWING) {
                 if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) == 0) {
                     swing = swing->next;
@@ -2877,7 +3740,25 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                 act->btl->hcEffectCount--;
                 break;
             }
-        } else if ((s16)work->stateTimer == hitFrames[work->swingSpeed]) {
+        } else if (
+#ifdef PLATFORM_PC
+            actionMotion && sActionIndependent ?
+                (work->steps==0 && ActionAnimationTicks(work)>=hitFrames[work->swingSpeed]) :
+#endif
+            (s16)work->stateTimer == hitFrames[work->swingSpeed]) {
+#ifdef PLATFORM_PC
+            if (actionMotion && sActionIndependent) {
+                work->steps=1;
+                if (ActionTraceEnabled())
+                    PortLog("action: strike frame=%u command=%u timer=%u", (unsigned)gFrameCounter,
+                        (unsigned)sActionCurrent.command, (unsigned)work->stateTimer);
+                PortActionFxCue(act->x, act->y, act->z - (20 << 8),
+                    PORT_ACTION_FX_SLASH,
+                    (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0,
+                    work->comboCount>=2 ? 3 : (swing->animId==12 ? 2 :
+                        ((swing->animId==7 || swing->animId==27) ? 1 : 0)));
+            }
+#endif
             MakeOpponentsHittable();
 
             if (act->btl->hcEffect == HC_EFFECT_WIDE_ATTACK_2) {
@@ -2968,7 +3849,15 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             } else {
                 work->flags &= ~BTL_SORA_FLAG_SWING_HIT;
             }
-        } else if ((s16)work->stateTimer == hitFrames[work->swingSpeed] + 2) {
+        } else if (
+#ifdef PLATFORM_PC
+            actionMotion && sActionIndependent ?
+                (work->steps==1 && ActionAnimationTicks(work)>=hitFrames[work->swingSpeed]+2) :
+#endif
+            (s16)work->stateTimer == hitFrames[work->swingSpeed] + 2) {
+#ifdef PLATFORM_PC
+            if (actionMotion && sActionIndependent) work->steps=2;
+#endif
             if (swing->flags & COMBO_FLAG_ZOOM_ON_HIT) {
                 SetBattleZoom(15, Q_8_8(1), gBtlWork->x2, gBtlWork->y2);
             }
@@ -2987,11 +3876,33 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             break;
         }
 
+#ifdef PLATFORM_PC
+        /* An attack request never restarts a playing swing. Wait for the
+         * actual final authored pose, including on a whiff or while landing.
+         * The controller's single queued input is accepted next update. */
+        if (actionMotion && sActionIndependent && sActionCurrent.comboStep && !sActionCurrent.finisher &&
+            AnimIsFinished(&work->anim)) {
+            if (ActionTraceEnabled())
+                PortLog("action: animation-complete frame=%u command=%u timer=%u anim=%u pose=%u", (unsigned)gFrameCounter,
+                    (unsigned)sActionCurrent.command, (unsigned)work->stateTimer,
+                    (unsigned)AnimGetId(&work->anim), (unsigned)AnimGetFrame(&work->anim));
+            DisableBtlSoraPassThrough(work);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
+
         if (AnimIsFinished(&work->anim) && (act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) == 0) {
             SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
             break;
         }
 
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && sActionCurrent.comboStep) {
+            if (work->stateTimer>0 && work->steps==0)
+                ActionApproachMeleeTarget(work);
+        } else
+#endif
         if (AnimGetFrame(&work->anim) <= 2) {
             enemy = act->btl->actor2;
 
@@ -3222,7 +4133,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         break;
     case BTL_SORA_STATE_AERO:
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -3234,7 +4149,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             m4aSongNumStart(SONG_VO_SR_AIRO00);
         }
 
-        if ((s16)work->stateTimer == 27) {
+#ifdef PLATFORM_PC
+        if (timer == 14) ActionAdvanceCastPose(work);
+#endif
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             switch (work->variant[0]) {
             case SPELL_TIER_BASE:
                 BgFxStartAero(SPELL_TIER_BASE, act->x, act->y, act->z, 81);
@@ -3248,12 +4169,21 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
 
             m4aSongNumStart(SONG_EF_AIRO_HIT);
-        } else if ((s16)work->stateTimer > 27 && !BgFxIsActive()) {
+        } else if (timer == 27 && (s16)work->stateTimer > timer && !BgFxIsActive()) {
             SetBtlSoraAnimation(work, 46, 0);
             SetBtlSoraState(work, BTL_SORA_STATE_RECOVER);
             break;
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         work->stateTimer++;
         break;
     case BTL_SORA_STATE_HOLY:
@@ -3520,7 +4450,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         s32 targetX;
         s32 targetY;
 
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -3531,7 +4465,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             m4aSongNumStart(SONG_VO_SR_THNDER00);
         }
 
-        if ((s16)work->stateTimer == 27) {
+#ifdef PLATFORM_PC
+        if (timer == 14) ActionAdvanceCastPose(work);
+#endif
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             switch (work->variant[0]) {
             case SPELL_TIER_BASE:
                 enemy = act->btl->actor2;
@@ -3560,14 +4500,23 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                 BgFxStartWideThunder(SPELL_TIER_GA, act->x, act->y, act->z - 16384, act->groundZ, 74);
                 break;
             }
-        } else if (work->variant[0] != SPELL_TIER_BASE && (s16)work->stateTimer == 47) {
+        } else if (timer == 27 && work->variant[0] != SPELL_TIER_BASE && (s16)work->stateTimer == 47) {
             SetBattleZoom(15, 148, 65536, 76800);
-        } else if ((s16)work->stateTimer > 27 && !BgFxIsActive()) {
+        } else if (timer == 27 && (s16)work->stateTimer > timer && !BgFxIsActive()) {
             SetBattleZoom(15, Q_8_8(1), gBtlWork->x2, gBtlWork->y2);
             SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
             break;
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         if (AnimIsFinished(&work->anim)) {
             SetBtlSoraAnimation(work, 1, 1);
         }
@@ -3577,7 +4526,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
         break;
     case BTL_SORA_STATE_GRAVITY:
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -3586,10 +4539,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             FocusBtlSoraCameraOnTarget(work);
             SetBtlSoraAnimation(work, 42, 0);
             m4aSongNumStart(SONG_VO_SR_GURABI00);
-            FadeToAmount(FADE_MODE_ADD_WHITE, 13, 60);
+            if (timer == 27) FadeToAmount(FADE_MODE_ADD_WHITE, 13, 60);
         }
 
-        if ((s16)work->stateTimer == 27) {
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             enemy = act->btl->actor2;
 
             if (enemy != NULL) {
@@ -3611,12 +4567,21 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                                   work->variant[0] + 75);
                 }
             }
-        } else if ((s16)work->stateTimer > 27 && !BgFxIsActive()) {
+        } else if (timer == 27 && (s16)work->stateTimer > timer && !BgFxIsActive()) {
             SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
             FadeToOriginal(FADE_MODE_ADD_WHITE, 20);
             break;
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         if (AnimIsFinished(&work->anim)) {
             SetBtlSoraAnimation(work, 1, 1);
         }
@@ -3772,7 +4737,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     case BTL_SORA_STATE_FIRE: {
         BtlObj* enemy;
 
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -3783,7 +4752,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             m4aSongNumStart(SONG_VO_SR_FIRE00);
         }
 
-        if ((s16)work->stateTimer == 27) {
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             switch (work->variant[0]) {
             default:
                 attack = 68;
@@ -3811,7 +4783,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                 BgFxStartFire(work->variant[0], act->x + 18432, act->y, act->z - 3584,
                               act->originX + 51200, act->originY, targetZ, FALSE, attack);
             }
-        } else if ((s16)work->stateTimer > 27) {
+        } else if (timer == 27 && (s16)work->stateTimer > timer) {
             FocusBtlSoraCameraOnBgFx(work);
 
             if (!BgFxIsActive()) {
@@ -3820,6 +4792,15 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         if (AnimIsFinished(&work->anim)) {
             SetBtlSoraAnimation(work, 1, 1);
         }
@@ -3868,7 +4849,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         s32 z;
         s32 attack;
 
-        if ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ) {
+        timer = 27;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionQuickMagic()) timer = 14;
+#endif
+        if (timer != 14 && ((act->btl->flags & BTL_FLAG_PLAYER_AIRBORNE) || act->z < act->groundZ)) {
             FocusBtlSoraCameraOnTarget(work);
             break;
         }
@@ -3879,7 +4864,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             m4aSongNumStart(SONG_VO_SR_BURIZAD00);
         }
 
-        if ((s16)work->stateTimer == 27) {
+        if ((s16)work->stateTimer == timer) {
+#ifdef PLATFORM_PC
+            if (timer == 14) TraceActionCast(work, "release");
+#endif
             switch (work->variant[0]) {
             case SPELL_TIER_BASE:
                 attack = 69;
@@ -3903,7 +4891,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                               act->originX + 23040, act->originY,
                               z, FALSE, attack);
             }
-        } else if ((s16)work->stateTimer > 27) {
+        } else if (timer == 27 && (s16)work->stateTimer > timer) {
             FocusBtlSoraCameraOnBgFx(work);
 
             if (!BgFxIsActive()) {
@@ -3912,6 +4900,15 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
         }
 
+#ifdef PLATFORM_PC
+        if (timer == 14 && work->stateTimer >= 20) {
+            TraceActionCast(work, "recovery");
+            if (act->z < act->groundZ) SetBtlSoraDirAnimation(work, 3, 1);
+            else SetBtlSoraAnimation(work, 1, 1);
+            SetBtlSoraState(work, act->z < act->groundZ ? BTL_SORA_STATE_AIRBORNE : BTL_SORA_STATE_IDLE);
+            break;
+        }
+#endif
         if (AnimIsFinished(&work->anim)) {
             SetBtlSoraAnimation(work, 1, 1);
         }
@@ -3923,9 +4920,13 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     case BTL_SORA_STATE_SONIC_BLADE: {
         s32 elapsed;
 
+
         hit = ATTACK_RESULT_NONE;
         FocusBtlSoraCameraOnTarget(work);
         elapsed = work->stateTimer;
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && ActionFullNative() && work->stateTimer>0) elapsed=ActionAnimationTicks(work);
+#endif
 
         if ((s16)elapsed == 0) {
             EnableBtlSoraPassThrough(work);
@@ -3986,7 +4987,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
         }
 
-        if ((s16)work->stateTimer == 22) {
+        if ((s16)elapsed == 22) {
             if (work->comboCount > 5) {
                 SetBattleZoom(15, Q_8_8(1), gBtlWork->x2, gBtlWork->y2);
             }
@@ -4006,7 +5007,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             break;
         }
 
-        if ((s16)work->stateTimer > 38 && (pressed & A_BUTTON) && work->comboCount <= 5) {
+        if ((s16)work->stateTimer > 38 && (pressed & A_BUTTON) && work->comboCount <= 5
+#ifdef PLATFORM_PC
+            && !(actionMotion && sActionIndependent && ActionFullNative())
+#endif
+        ) {
             act->flags ^= BTLOBJ_FLAG_FACING_LEFT;
             work->comboCount++;
             MakeOpponentsHittable();
@@ -4018,6 +5023,17 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         }
 
         if (AnimIsFinished(&work->anim)) {
+#ifdef PLATFORM_PC
+            if (actionMotion && sActionIndependent && ActionFullNative()) {
+                if (ActionTraceEnabled()) PortLog("action: native-segment frame=%u move=%u segment=%u",(unsigned)gFrameCounter,
+                    (unsigned)sActionCurrent.nativeMove,(unsigned)work->comboCount+1);
+                if (work->comboCount<6) {
+                    act->flags^=BTLOBJ_FLAG_FACING_LEFT;++work->comboCount;
+                    MakeOpponentsHittable();SelectLockonTarget();
+                    work->stateTimer=0;work->steps=0;break;
+                }
+            }
+#endif
             FadeToOriginal(FADE_MODE_BLACK, 8);
             SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
             DisableBtlSoraPassThrough(work);
@@ -5083,6 +6099,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         }
 
         if (AnimIsFinished(&work->anim)) {
+#ifdef PLATFORM_PC
+            if (actionMotion && sActionIndependent && ActionFullNative() && ActionTraceEnabled())
+                PortLog("action: native-segment frame=%u move=%u segment=%u",(unsigned)gFrameCounter,
+                    (unsigned)sActionCurrent.nativeMove,3u-(unsigned)work->comboCount);
+#endif
             if (work->comboCount == 0) {
                 SetBtlSoraState(work, BTL_SORA_STATE_IDLE);
                 FadeToOriginal(FADE_MODE_BLACK, 8);
@@ -5291,11 +6312,31 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         elapsed = work->stateTimer;
         timer = work->stateTimer;
 
-        if ((timer > 9 && (pressed & A_BUTTON)) || timer > 120) {
+        if ((timer > 9 && (pressed & A_BUTTON)
+#ifdef PLATFORM_PC
+            && !(actionMotion && sActionIndependent && ActionFullNative())
+#endif
+            ) || timer > 120) {
+            s32 shotOffset=10240;
+#ifdef PLATFORM_PC
+            if (actionMotion && sActionIndependent && ActionFullNative()) {
+                BtlObj* target=ActionLiveMeleeTarget();
+                if (target) {
+                    s32 distance=(act->flags & BTLOBJ_FLAG_FACING_LEFT) ? act->x-target->x : target->x-act->x;
+                    if (distance>=0 && distance<56*256) {
+                        /* The native beam's first collision lies8px beyond
+                         * its muzzle. Keep the original projectile in front
+                         * of a close combo victim instead of firing past it. */
+                        shotOffset=distance-16*256;
+                        if (shotOffset<0) shotOffset=0;
+                    }
+                }
+            }
+#endif
             if (act->flags & BTLOBJ_FLAG_FACING_LEFT) {
-                BgFxStartRagnarokShot(act->x - 10240, act->y, act->z - 6144, TRUE);
+                BgFxStartRagnarokShot(act->x - shotOffset, act->y, act->z - 6144, TRUE);
             } else {
-                BgFxStartRagnarokShot(act->x + 10240, act->y, act->z - 6144, FALSE);
+                BgFxStartRagnarokShot(act->x + shotOffset, act->y, act->z - 6144, FALSE);
             }
 
             work->state = BTL_SORA_STATE_RAGNAROK_SHOT;
@@ -6006,6 +7047,16 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         }
     }
 
+#ifdef PLATFORM_PC
+    /* Finite aerial swing hangs preserve the original poses. The third
+     * attack is the aerial finisher and resumes gravity after its strike. */
+    if (work == sActionWork && sActionIndependent && sActionCurrent.airborne &&
+        work->state == BTL_SORA_STATE_COMBO &&
+        PortActionAirChainHang(work->stateTimer,work->comboCount,sActionState.finisherFrames!=0) &&
+        act->z < act->groundZ &&
+        act->badStatus == BAD_STATUS_NONE && !(act->flags & BTLOBJ_FLAG_DAMAGE_PENDING))
+        work->vz = 0;
+#endif
     act->z += work->vz;
     work->vz += gBtlWork->gravity;
 
@@ -6149,6 +7200,9 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 
     ApplyBattleBounds(&act->x, &act->y, &act->z, &act->floorZ);
     TaskPoolUpdate(&work->tasks);
+#ifdef PLATFORM_PC
+    if (work==sActionWork) ActionCosmeticsUpdate();
+#endif
 
     if (work->state == BTL_SORA_STATE_CARD_BROKEN && (work->flags & BTL_SORA_FLAG_HIDDEN)) {
         work->flags &= ~BTL_SORA_FLAG_HIDDEN;
@@ -6160,6 +7214,16 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     }
 
     if (act->badStatus != BAD_STATUS_STOP) {
+#ifdef PLATFORM_PC
+        if (actionMotion && sActionIndependent && work->state==BTL_SORA_STATE_COMBO && !ActionFullNative()) {
+            unsigned updates=PortActionAnimationSteps(work->stateTimer ? work->stateTimer-1 : 0,0);
+            while (updates--) work->gfx=AnimUpdate(&work->anim);
+        } else if (actionMotion && sActionIndependent && ActionFullNative() &&
+            sActionCurrent.nativeMove==MOVE_SONIC_BLADE && work->state==BTL_SORA_STATE_SONIC_BLADE) {
+            work->gfx=AnimUpdate(&work->anim);
+            work->gfx=AnimUpdate(&work->anim);
+        } else
+#endif
         work->gfx = AnimUpdate(&work->anim);
     }
 
@@ -6167,6 +7231,398 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     work->frameCount++;
     return 1;
 }
+
+#ifdef PLATFORM_PC
+extern Mode* gCurrentMode;
+extern Mode gModeBattle;
+
+int PortActionCombatRules(void) {
+    return gPortConfig.actionCombat && gCurrentMode == &gModeBattle && gBtlWork &&
+        !(gGameState.flags & GAME_FLAG_RIKU) && !(gBtlWork->flags & BTL_FLAG_VS_BATTLE);
+}
+
+int PortActionCombatActive(void) {
+    return PortActionCombatRules() &&
+        sActionWork && gBtlWork->actor == &sActionWork->actor &&
+        !(gBtlWork->flags & BTL_FLAG_TUTORIAL) &&
+        (gBtlWork->phase == BTL_PHASE_IDLE || gBtlWork->phase == BTL_PHASE_CARD_PLAY);
+}
+
+void PortActionCaptureInput(void) {
+    if (PortActionCombatActive()) {
+        sActionPressedLatched |= GetKeysPressed() & (A_BUTTON | B_BUTTON | L_BUTTON | R_BUTTON);
+        sActionAuxPressedLatched |= PortInputActionPressed();
+        if (PortActionGuardHeld()) sActionGuardLatched=1;
+    } else {
+        sActionPressedLatched = 0;
+        sActionAuxPressedLatched=0;
+        sActionGuardLatched=0;
+    }
+}
+
+int PortActionPlayerIndependent(void) {
+    /* A command already playing retains its ownership through a setting
+     * change; the shared enemy channel must not start waiting on that actor. */
+    return sActionIndependent && sActionWork && gCurrentMode == &gModeBattle &&
+        gBtlWork && gBtlWork->actor == &sActionWork->actor;
+}
+
+static int ActionTargetUsable(BtlObj* target) {
+    return target->hp>0 && !(target->flags & (BTLOBJ_FLAG_INTANGIBLE |
+        BTLOBJ_FLAG_UNHITTABLE | BTLOBJ_FLAG_DEFEATED | BTLOBJ_FLAG_INVULNERABLE));
+}
+
+/* Never dereference a remembered task pointer before proving it is still a
+ * live member of the battle's actor pool. Enemy destruction may reuse slots. */
+static BtlObj* ActionLiveMeleeTarget(void) {
+    BtlObj* enemy = ListPoolFirst(&gBtlWork->pool);
+    for (;enemy;enemy=ListPoolNext(&enemy->node)) {
+        if (enemy==sActionTarget) {
+            BtlObj* act=gBtlWork->actor;
+            if (!ActionTargetUsable(enemy) || enemy->x-act->x < -96*256 ||
+                enemy->x-act->x > 96*256 || enemy->y-act->y < -48*256 ||
+                enemy->y-act->y > 48*256 || enemy->z-act->z < -(sActionCurrent.finisher?80:64)*256 ||
+                enemy->z-act->z > (sActionCurrent.finisher?80:64)*256) return NULL;
+            return enemy;
+        }
+    }
+    return NULL;
+}
+
+static void ActionSelectMeleeTarget(BtlSoraWork* work, u16 held) {
+    BtlObj* act=&work->actor;
+    BtlObj* enemy=ListPoolFirst(&gBtlWork->pool);
+    int best=0x7fffffff;
+    if ((held&(PORT_ACTION_LEFT|PORT_ACTION_RIGHT))==PORT_ACTION_LEFT)
+        act->flags|=BTLOBJ_FLAG_FACING_LEFT;
+    else if ((held&(PORT_ACTION_LEFT|PORT_ACTION_RIGHT))==PORT_ACTION_RIGHT)
+        act->flags&=~BTLOBJ_FLAG_FACING_LEFT;
+    sActionTarget=NULL;
+    for (;enemy;enemy=ListPoolNext(&enemy->node)) {
+        int score;
+        if (!ActionTargetUsable(enemy)) continue;
+        score=(sActionCurrent.finisher ? PortActionFinisherTargetScore : PortActionTargetScore)(
+            enemy->x-act->x,enemy->y-act->y,enemy->z-act->z,
+            held,(act->flags & BTLOBJ_FLAG_FACING_LEFT)!=0,enemy==act->btl->actor2);
+        if (score>=0 && score<best) { best=score; sActionTarget=enemy; }
+    }
+    act->btl->actor2=sActionTarget;
+    if (ActionTraceEnabled())
+        PortLog("action: target frame=%u found=%u x=%d y=%d dx=%d dy=%d",(unsigned)gFrameCounter,
+            sActionTarget!=NULL,act->x>>8,act->y>>8,
+            sActionTarget?(sActionTarget->x-act->x)>>8:0,
+            sActionTarget?(sActionTarget->y-act->y)>>8:0);
+}
+
+int PortActionLockMeleeTarget(void) {
+    if (!PortActionCombatActive() || !sActionIndependent) return 0;
+    if (sActionCurrent.finisher) {
+        if (sActionWork->state!=BTL_SORA_STATE_BLITZ && sActionWork->state!=BTL_SORA_STATE_BLITZ_STRIKE &&
+            sActionWork->state!=BTL_SORA_STATE_SONIC_BLADE) return 0;
+    } else if (!sActionCurrent.comboStep || sActionWork->state!=BTL_SORA_STATE_COMBO) return 0;
+    gBtlWork->actor2=ActionLiveMeleeTarget();
+    return 1;
+}
+
+static void ActionApproachMeleeTarget(BtlSoraWork* work) {
+    BtlObj* act=&work->actor;
+    BtlObj* target=ActionLiveMeleeTarget();
+    int left=(act->flags & BTLOBJ_FLAG_FACING_LEFT)!=0;
+    int desiredX=act->originX+(left?-8:8)*256,desiredY=act->y;
+    int dx,dy;
+    /* A miss does not launch Sora forward. A real nearby target receives a
+     * small, collision-respecting nudge once per complete swing. */
+    if (!target) return;
+    desiredX=target->x+(left?24:-24)*256;
+    desiredY=target->y;
+    if ((left && desiredX>act->x)||(!left && desiredX<act->x)) desiredX=act->x;
+    dx=PortActionApproachStep(act->x,act->originX,desiredX,
+        sActionCurrent.finisher?512:256,(sActionCurrent.finisher?16:8)*256);
+    dy=PortActionApproachStep(act->y,act->originY,desiredY,
+        128,(sActionCurrent.finisher?6:4)*256);
+    act->x+=dx; act->y+=dy;
+    if ((dx||dy) && ActionTraceEnabled())
+        PortLog("action: approach frame=%u dx=%d dy=%d",(unsigned)gFrameCounter,dx,dy);
+}
+
+void PortActionPlayerMeleeHit(void) {
+    unsigned old, readyBefore;
+    if (!PortActionCombatActive() || !sActionIndependent || !sActionCurrent.comboStep ||
+        (sActionWork->state!=BTL_SORA_STATE_COMBO && !sActionCurrent.finisher)) return;
+    old=sActionState.mp;
+    readyBefore=sActionState.finisherFrames;
+    if (PortActionRestoreOnHit(&sActionState) && ActionTraceEnabled())
+        PortLog("action: melee mp frame=%u old=%u new=%u",(unsigned)gFrameCounter,old,
+            (unsigned)sActionState.mp);
+    if (!readyBefore && sActionState.finisherFrames && ActionTraceEnabled())
+        PortLog("action: finisher ready frame=%u air=%u confirmed=%u", (unsigned)gFrameCounter,
+            (unsigned)sActionState.finisherAirborne, (unsigned)sActionState.confirmedChain);
+}
+
+int PortActionPlayerGuarding(void) {
+    return PortActionCombatActive() && sActionWork->state==BTL_SORA_STATE_ACTION_GUARD;
+}
+
+int PortActionSelectNativeMove(uint32_t nativeMove) {
+    if (!PortActionCatalogValidMove(nativeMove)) return 0;
+    sActionSelectedMove=nativeMove;
+    if (nativeMove<=MOVE_ONE_WINGED_ANGEL) sActionSelectedKeyblade=(u8)nativeMove;
+    if (PortActionCatalogFinisherEligible(nativeMove)) {
+        sActionSelectedFinisher=nativeMove;
+        PortActionSelectFinisher(&sActionState,nativeMove);
+    }
+    return 1;
+}
+
+uint32_t PortActionSelectedNativeMove(void) { return sActionSelectedMove; }
+uint32_t PortActionSelectedFinisherMove(void) { return sActionSelectedFinisher; }
+
+int PortActionRequestNativeMove(uint32_t nativeMove) {
+    const char* catalogTest;
+    if (!PortActionCombatActive() || !PortActionCatalogValidMove(nativeMove)) return 0;
+    if (PortActionAssistSupported(nativeMove)) {
+        catalogTest=getenv("KHCOM_CATALOG_INDEX");
+        PortActionQueueAssist(&sActionState,nativeMove,PortPracticeActive() && catalogTest && *catalogTest);
+        return 1;
+    }
+    PortActionQueueNative(&sActionState,nativeMove);
+    sActionState.bufferedHeld=ActionDirections(GetKeysHeld());
+    return 1;
+}
+
+int PortActionPlayerFinisherActive(void) {
+    return PortActionCombatActive() && sActionIndependent && ActionFullNative();
+}
+
+void PortActionPlayerImpact(unsigned attack) {
+    if (!PortActionPlayerFinisherActive()) return;
+    sActionImpactFrame=gFrameCounter;
+    if (sActionCurrentAccent) {
+        ActionCosmeticCue(sActionWork->actor.x,sActionWork->actor.y,sActionWork->actor.z-24*256,4);
+        sActionCurrentAccent=0;
+    }
+    if (sActionFinisherAssistGain<12) {
+        PortActionAddAssistGauge(&sActionState,2);
+        sActionFinisherAssistGain+=2;
+    }
+    if (ActionTraceEnabled())
+        PortLog("action: finisher-contact frame=%u command=%u move=%u attack=%u result=1 pose=%u",(unsigned)gFrameCounter,
+            (unsigned)sActionCurrent.command,(unsigned)sActionCurrent.nativeMove,attack,
+            (unsigned)AnimGetFrame(&sActionWork->anim));
+}
+
+void PortActionStatusContact(unsigned attack,unsigned targetKind,unsigned duration) {
+    u32 move=(sActionAssist && attack>=116 && attack<=163) ? sActionAssist->move : sActionCurrent.nativeMove;
+    if (ActionTraceEnabled()) PortLog("action: status-contact frame=%u attack=%u status=stop target=%u duration=%u move=%u",
+        (unsigned)gFrameCounter,attack,targetKind,duration,(unsigned)move);
+}
+
+int PortActionGuardFaces(int32_t sourceX,int32_t sourceY) {
+    BtlObj* act;
+    int dx,dy;
+    if (!PortActionPlayerGuarding() || !(PortActionGuardHeld() || sActionGuardDispatch)) return 0;
+    act=&sActionWork->actor;
+    if (!ActionCanDefend(sActionWork)) return 0;
+    dx=sourceX-act->x;dy=sourceY-act->y;
+    if ((act->flags & BTLOBJ_FLAG_FACING_LEFT) ? dx>0 : dx<0) return 0;
+    if (dx<0) dx=-dx;
+    if (dy<0) dy=-dy;
+    return dy*2<=dx+24*256;
+}
+
+void PortActionGuardBlocked(unsigned attack) {
+    if (ActionTraceEnabled())
+        PortLog("action: blocked frame=%u attack=%u",(unsigned)gFrameCounter,attack);
+}
+
+const PortActionState* PortActionGameState(void) {
+    return PortActionCombatActive() ? &sActionState : NULL;
+}
+
+void PortActionObserveEnemyAttack(int32_t x, int32_t y, int32_t z,
+        int16_t halfX, int16_t halfY, int16_t halfZ) {
+    BtlObj* act;
+    if (!PortActionCombatActive() || sActionWork->state != BTL_SORA_STATE_DODGE ||
+        sActionWork->stateTimer < 2 || sActionWork->stateTimer > 7) return;
+    act = &sActionWork->actor;
+    if (!(act->flags & BTLOBJ_FLAG_HIT_LOCKED) || act->hp <= 0 ||
+        act->invincibleTimer || act->delayedDamage ||
+        (act->flags & (BTLOBJ_FLAG_DAMAGE_PENDING | BTLOBJ_FLAG_INTANGIBLE |
+                      BTLOBJ_FLAG_UNHITTABLE | BTLOBJ_FLAG_HURT)) ||
+        (act->badStatus != BAD_STATUS_NONE && act->badStatus != BAD_STATUS_CONFUSE)) return;
+    if (halfX < 0 || halfY < 0 || halfZ < 0 ||
+        x - halfX * 256 > act->x + act->radiusX * 256 ||
+        x + halfX * 256 < act->x - act->radiusX * 256 ||
+        y - halfY * 256 > act->y + act->radiusY * 256 ||
+        y + halfY * 256 < act->y - act->radiusY * 256 ||
+        z - halfZ * 256 > act->z ||
+        z + halfZ * 256 < act->z - act->height * 256) return;
+    if (PortActionPerfectDodge(&sActionState)) {
+        PortActionFxCue(act->x, act->y, act->z - (20 << 8),
+            PORT_ACTION_FX_GUARD, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0, 1);
+        if (ActionTraceEnabled())
+            PortLog("action: perfect dodge frame=%u mp=%u", (unsigned)gFrameCounter,
+                (unsigned)sActionState.mp);
+    }
+}
+
+static u16 ActionDirections(u16 keys) {
+    return ((keys & DPAD_UP) ? PORT_ACTION_UP : 0) |
+        ((keys & DPAD_DOWN) ? PORT_ACTION_DOWN : 0) |
+        ((keys & DPAD_LEFT) ? PORT_ACTION_LEFT : 0) |
+        ((keys & DPAD_RIGHT) ? PORT_ACTION_RIGHT : 0);
+}
+
+static s32 UpdateActionSora(BtlSoraWork* work) {
+    BtlObj* previous;
+    BtlObj* act = &work->actor;
+    PortActionInput input;
+    u16 held, pressed,auxPressed;
+    s32 result;
+    s16 hpBefore;
+    unsigned chainBefore;
+    u32 pendingNative;
+    int nativeAllowed=1;
+    int effectBefore;
+    int ready;
+
+    sActionDispatchPressed = 0;
+    sActionGuardDispatch = 0;
+    if (work != sActionWork || (!PortActionCombatActive() && !sActionIndependent))
+        return task_btl_sora_1(work);
+
+    previous = BtlSetAttackSource(act);
+    hpBefore = act->hp;
+    effectBefore=BgFxIsActive()!=0;
+    chainBefore = PortActionFeedbackGet()->hits;
+    if (!PortActionCombatActive()) {
+        /* Finish an existing independent action with its own damage source,
+         * even when controls are disabled or the battle enters its ending. */
+        PortActionInterrupt(&sActionState);
+        sActionPressedLatched = 0;
+        sActionAuxPressedLatched=0;
+        sActionGuardLatched = 0;
+        result = task_btl_sora_1(work);
+        if (!(act->flags & BTLOBJ_FLAG_IN_CARD_ACTION) && work->state != BTL_SORA_STATE_COMBO)
+            sActionIndependent = 0;
+        BtlSetAttackSource(previous);
+        return result;
+    }
+    PortActionFxTick();
+    PortActionFeedbackTick();
+    held = GetKeysHeld();
+    sActionDispatchPressed = GetKeysPressed() | sActionPressedLatched;
+    auxPressed=PortInputActionPressed() | sActionAuxPressedLatched;
+    sActionPressedLatched = 0;
+    sActionAuxPressedLatched=0;
+    sActionGuardDispatch=PortActionGuardHeld() || sActionGuardLatched;
+    sActionGuardLatched=0;
+    pressed = sActionDispatchPressed;
+    if (act->badStatus == BAD_STATUS_CONFUSE) {
+        held = SwapBtlSoraKeyBits(held, DPAD_LEFT, DPAD_RIGHT);
+        held = SwapBtlSoraKeyBits(held, DPAD_UP, DPAD_DOWN);
+        pressed = SwapBtlSoraKeyBits(pressed, DPAD_LEFT, DPAD_RIGHT);
+        pressed = SwapBtlSoraKeyBits(pressed, DPAD_UP, DPAD_DOWN);
+    }
+    memset(&input, 0, sizeof(input));
+    input.held = ActionDirections(held) | PortInputActionHeld() | ((held&A_BUTTON)?PORT_ACTION_ATTACK:0);
+    input.airborne = (gBtlWork->flags & BTL_FLAG_PLAYER_AIRBORNE) != 0;
+    input.facingLeft = (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0;
+    input.spellBusy = BgFxIsActive() != 0;
+    if (PortActionPendingNative(&sActionState,&pendingNative)) {
+        nativeAllowed=ActionNativeEnvironmentReady(pendingNative,input.airborne);
+        sActionState.bufferedHeld=input.held;
+    }
+    /* Hit reactions take priority. Never cancel damage by raising a fresh action request. */
+    input.interrupted = act->hp <= 0 ||
+        (act->badStatus != BAD_STATUS_NONE && act->badStatus != BAD_STATUS_CONFUSE) ||
+        (act->flags & ((BTLOBJ_FLAGS_NO_CARD_USE &
+            ((work->state == BTL_SORA_STATE_DODGE || sActionIndependent) ? ~BTLOBJ_FLAG_CARD_USE_BLOCKED : ~(u64)0)) |
+            BTLOBJ_FLAG_CARD_BREAK_PENDING | BTLOBJ_FLAGS_STATUS_PENDING | BTLOBJ_FLAG_HEAL_PENDING | BTLOBJ_FLAG_GRAVITY_PENDING |
+            BTLOBJ_FLAG_HAZARD_PENDING | BTLOBJ_FLAG_WARP_PENDING | BTLOBJ_FLAG_FREEZE_PENDING)) != 0 ||
+        act->delayedDamage != 0;
+    ready = work->state == BTL_SORA_STATE_IDLE || work->state == BTL_SORA_STATE_AIRBORNE ||
+        (work->state == BTL_SORA_STATE_LAND && act->z >= act->groundZ);
+    /* Playing melee animations own this state until AnimIsFinished above.
+     * Repeated Attack presses can fill one queue slot, never restart a pose. */
+    input.canAct = ready && nativeAllowed && !input.interrupted &&
+        !(act->flags & BTLOBJ_FLAG_CARD_ACTION_PENDING) &&
+        !(gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION);
+    if (pressed & A_BUTTON) input.pressed |= PORT_ACTION_ATTACK;
+    if (pressed & L_BUTTON) input.pressed |= PORT_ACTION_PREV_MAGIC;
+    if (pressed & R_BUTTON) input.pressed |= PORT_ACTION_NEXT_MAGIC;
+    input.pressed |= auxPressed;
+    PortActionTick(&sActionState, &input);
+    if (PortActionPendingAssist(&sActionState,&pendingNative) &&
+        PortActionTryStartAssist(pendingNative)==PORT_ASSIST_STARTED) {
+        PortActionCommitAssist(&sActionState,pendingNative);
+    }
+    if (sActionGuardDispatch) PortActionInterrupt(&sActionState);
+    if (PortActionPeek(&sActionState, &sActionPending)) {
+        /* BGFX is shared by the cartridge engine; avoid knowingly replacing an active effect. */
+        if ((sActionPending.command==PORT_ACTION_NATIVE_TECHNIQUE &&
+             ActionNativeEnvironmentReady(sActionPending.nativeMove,input.airborne)) ||
+            (sActionPending.command!=PORT_ACTION_NATIVE_TECHNIQUE && (sActionPending.comboStep ||
+             sActionPending.finisher || !BgFxIsActive()))) {
+            sActionQueued = 1;
+            act->flags |= BTLOBJ_FLAG_CARD_ACTION_PENDING;
+        }
+    }
+    result = task_btl_sora_1(work);
+    if (sActionCurrentAccent && sActionIndependent && ActionFullNative() && !effectBefore && BgFxIsActive()) {
+        int index=PortActionCatalogFindNative(sActionCurrent.nativeMove);
+        if (index>=0 && PortActionCatalogGet((unsigned)index)->category==PORT_CATALOG_MAGIC) {
+            ActionCosmeticCue(act->x,act->y,act->z-32*256,0);
+            sActionCurrentAccent=0;
+        }
+    }
+    if (sActionIndependent && ActionFullNative()) {
+        if (work->state==BTL_SORA_STATE_HURT || work->state==BTL_SORA_STATE_DEFEATED ||
+            work->state==BTL_SORA_STATE_GRAVITY_SQUASH || work->state==BTL_SORA_STATE_STUNNED) {
+            sActionIndependent=0;
+        } else if (ActionNeutralState(work)) {
+            if (sActionCurrent.nativeMove==MOVE_SONIC_BLADE) {
+                BtlObj* target=ActionLiveMeleeTarget();
+                if (target) {
+                    if (target->x<act->x) act->flags|=BTLOBJ_FLAG_FACING_LEFT;
+                    else if (target->x>act->x) act->flags&=~BTLOBJ_FLAG_FACING_LEFT;
+                    act->btl->actor2=target;
+                }
+            }
+            if (ActionTraceEnabled()) {
+                PortLog("action: native-complete frame=%u command=%u move=%u elapsed=%u state=%u",(unsigned)gFrameCounter,
+                    (unsigned)sActionCurrent.command,(unsigned)sActionCurrent.nativeMove,
+                    (unsigned)(gFrameCounter-sActionStartFrame),(unsigned)work->state);
+                PortLog("action: animation-complete frame=%u command=%u timer=%u anim=%u pose=%u",(unsigned)gFrameCounter,
+                    (unsigned)sActionCurrent.command,(unsigned)(gFrameCounter-sActionStartFrame),
+                    (unsigned)AnimGetId(&work->anim),(unsigned)AnimGetFrame(&work->anim));
+            }
+            sActionTraceDone=1;sActionTraceDoneFrame=gFrameCounter;sActionIndependent=0;
+        }
+    }
+    ActionTraceNativeState(work);
+    sActionDispatchPressed = 0;
+    sActionGuardDispatch = 0;
+    if (hpBefore > act->hp) PortActionFeedbackHurt();
+    if (ActionTraceEnabled() && PortActionFeedbackGet()->hits &&
+        chainBefore != PortActionFeedbackGet()->hits)
+        PortLog("action: chain frame=%u hits=%u damage=%u", (unsigned)gFrameCounter,
+            (unsigned)PortActionFeedbackGet()->hits, (unsigned)PortActionFeedbackGet()->damage);
+    if (ActionTraceEnabled() && hpBefore != act->hp)
+        PortLog("action: hp frame=%u old=%d new=%d state=%u independent=%u",
+                (unsigned)gFrameCounter, (int)hpBefore, (int)act->hp,
+                (unsigned)work->state, (unsigned)sActionIndependent);
+    if (sActionQueued) {
+        act->flags &= ~BTLOBJ_FLAG_CARD_ACTION_PENDING;
+        sActionQueued = 0;
+    }
+    if (!(act->flags & BTLOBJ_FLAG_IN_CARD_ACTION) && work->state != BTL_SORA_STATE_COMBO &&
+        !(sActionIndependent && ActionFullNative() && !ActionNeutralState(work)))
+        sActionIndependent = 0;
+    BtlSetAttackSource(previous);
+    return result;
+}
+#endif
 
 void task_btl_sora_2(BtlSoraWork* work) {
     BtlObj* act;
@@ -6280,9 +7736,24 @@ void task_btl_sora_2(BtlSoraWork* work) {
 
     DrawSprite(x, y, work->gfx, work->tiles, work->palette, affine, attr, priority);
     TaskPoolDraw(&work->tasks);
+#ifdef PLATFORM_PC
+    if (work==sActionWork && sActionCosmeticsReady) TaskPoolDraw(&sActionCosmetics);
+#endif
 }
 
 void task_btl_sora_3(BtlSoraWork* work) {
+#ifdef PLATFORM_PC
+    if (work == sActionWork) {
+        if (sActionCosmeticsReady) TaskPoolDestroy(&sActionCosmetics);
+        sActionCosmeticsReady=0;
+        sActionWork = NULL;
+        sActionQueued = sActionIndependent = 0;
+        sActionPressedLatched = sActionDispatchPressed = 0;
+        sActionAuxPressedLatched=0;
+        sActionGuardLatched = sActionGuardDispatch = 0;
+        memset(&sActionCurrent, 0, sizeof(sActionCurrent));
+    }
+#endif
     BtlObj* act;
 
     act = &work->actor;

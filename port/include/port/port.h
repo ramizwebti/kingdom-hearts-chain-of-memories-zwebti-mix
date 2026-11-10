@@ -111,6 +111,14 @@ enum {
     PORT_ACT_STOCK,
     PORT_ACT_DODGE,
     PORT_ACT_UNSTOCK,
+    PORT_ACT_GUARD,
+    PORT_ACT_TECHNIQUE,
+    PORT_ACT_MOVE_MENU,
+    PORT_ACT_MODIFIER,
+    PORT_ACT_PREV_ASSIST,
+    PORT_ACT_NEXT_ASSIST,
+    PORT_ACT_PREV_WEAPON,
+    PORT_ACT_NEXT_WEAPON,
     PORT_ACT_COUNT
 };
 
@@ -192,6 +200,7 @@ typedef struct PortConfig {
     int goldPremium;           /* appended, experimental, off: premium cards with a gold frame in the deck menu */
     int hideTitleHint;         /* appended, off: hide SELECT OPTIONS text; SELECT still opens options */
     int lcdGrid;               /* appended, 0..100: source-pixel LCD grid intensity; off by default */
+    int actionCombat;          /* private action combat prototype, opt-in; separate from cartridge rules */
 } PortConfig;
 
 extern PortConfig gPortConfig;
@@ -454,16 +463,30 @@ void PortInputInit(void);
 /* Deferred to the event pump so normal shutdown also closes the desktop launcher. */
 void PortRequestQuitAll(void);
 void PortInputResetBindings(void); /* clear keys from the old mapping and suppress held pad buttons */
-uint16_t PortInputKeys(void);
+void PortInputSuppressUntilRelease(void);
+uint32_t PortInputKeys(void);
 /* The port's extra buttons, beyond the GBA's ten key bits. */
 /* the HD files' paths: room for a data folder and KHCOM_HD_SPRITES anywhere on the disk */
 #define PORT_HD_PATH_MAX 1024
 #define PORT_KEY_STOCK 0x400
 #define PORT_KEY_DODGE 0x800
 #define PORT_KEY_UNSTOCK 0x1000
+#define PORT_KEY_GUARD 0x2000
+#define PORT_KEY_TECHNIQUE 0x4000
+#define PORT_KEY_MOVE_MENU 0x8000
+#define PORT_KEY_MODIFIER 0x10000u
+#define PORT_KEY_PREV_ASSIST 0x20000u
+#define PORT_KEY_NEXT_ASSIST 0x40000u
+#define PORT_KEY_PREV_WEAPON 0x80000u
+#define PORT_KEY_NEXT_WEAPON 0x100000u
 /* Turns the extra buttons into GBA keys and requests; returns the GBA key
    bits. Called once per frame. */
-uint16_t PortInputResolve(uint16_t keys);
+uint16_t PortInputResolve(uint32_t keys);
+uint16_t PortInputActionHeld(void);
+uint16_t PortInputActionPressed(void);
+/* Held action-mode guard, sampled before the extra input bits are stripped.
+ * Keyboard/gamepad bindings are independent of the classic stock control. */
+int PortActionGuardHeld(void);
 int PortInputKeyBound(int key); /* the keyboard key is bound to a game action */
 void PortInputHandleEvent(const void* sdlEvent);
 void PortPromptHandleEvent(const void* sdlEvent); /* raw, before Nintendo normalization and menu consumption */

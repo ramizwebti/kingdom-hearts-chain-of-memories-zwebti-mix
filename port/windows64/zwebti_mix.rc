@@ -1,0 +1,35 @@
+/* First icon group: Explorer and SDL's Windows resource hints use ID 1. */
+#ifndef ZWEBTI_ICON_FILE
+#define ZWEBTI_ICON_FILE "kingdom-hearts-chain-of-memories-zwebti-mix.ico"
+#endif
+1 ICON ZWEBTI_ICON_FILE
+
+1 VERSIONINFO
+FILEVERSION 0,10,1,0
+PRODUCTVERSION 0,10,1,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "ProductName", "Kingdom Hearts Chain of Memories: Zwebti Mix"
+            VALUE "ProductVersion", "0.10.1"
+            VALUE "FileVersion", "0.10.1"
+            VALUE "InternalName", "KingdomHeartsChainOfMemoriesZwebtiMix"
+#ifdef ZWEBTI_LAUNCHER
+            VALUE "FileDescription", "Kingdom Hearts Chain of Memories: Zwebti Mix launcher"
+            VALUE "OriginalFilename", "Kingdom Hearts Chain of Memories - Zwebti Mix.exe"
+#else
+            VALUE "FileDescription", "Kingdom Hearts Chain of Memories: Zwebti Mix"
+            VALUE "OriginalFilename", "rekhcom64.exe"
+#endif
+            VALUE "LegalCopyright", "Independent fan modification based on ReKHCoM. Kingdom Hearts belongs to its respective owners."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

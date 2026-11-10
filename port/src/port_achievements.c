@@ -367,7 +367,7 @@ void PortAchievementsFrame(void) {
         sPreviewFrame == (unsigned)SDL_atoi(SDL_getenv("KHCOM_ACHIEVEMENT_PREVIEW")))
         PortAchievementToast("Heartless Hunter", "Defeat your first Heartless in Castle Oblivion.", "VISTA PREVIA - LOGRO", SDL_atoi(SDL_getenv("KHCOM_ACHIEVEMENT_BADGE") ? SDL_getenv("KHCOM_ACHIEVEMENT_BADGE") : "0"));
     /* Invalidate before this frame can evaluate or submit an official award. */
-    if (gPortConfig.cheatOneHit || gPortConfig.cheatInfiniteHp || gPortConfig.cheatUnlockRiku || gPortConfig.cheatSaveStates) {
+    if (gPortConfig.actionCombat || gPortConfig.cheatOneHit || gPortConfig.cheatInfiniteHp || gPortConfig.cheatUnlockRiku || gPortConfig.cheatSaveStates) {
         PortAchievementsInvalidate("Gameplay modifiers enabled");
         RebelStart(); /* not a test run: those never reach this (sInvalidated from the start) */
     }

@@ -1,9 +1,9 @@
 @echo off
 setlocal
-title Zwebti Mix
+title Kingdom Hearts Chain of Memories: Zwebti Mix
 if not exist "%~dp0launch.ps1" goto incomplete
 echo.
-echo  ZWEBTI MIX
+echo  Kingdom Hearts Chain of Memories: Zwebti Mix
 echo  Starting the Windows game launcher...
 echo.
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "%~dp0launch.ps1"
@@ -17,7 +17,7 @@ exit /b %PLAY_EXIT%
 
 :incomplete
 echo.
-echo  Extract the ZIP before starting Zwebti Mix.
+echo  Extract the ZIP before starting Kingdom Hearts Chain of Memories: Zwebti Mix.
 echo.
 echo  Right-click the downloaded ZIP, choose Extract All, then Extract.
 echo  Open the extracted folder and double-click PLAY.cmd there.

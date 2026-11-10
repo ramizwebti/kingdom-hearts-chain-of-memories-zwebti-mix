@@ -1,27 +1,17 @@
-# Zwebti Mix
+# Kingdom Hearts Chain of Memories: Zwebti Mix
 
-<p align="center"><img src="mod/action-edition/branding/zwebti-mix-logo.png" width="480" alt="Zwebti Mix"></p>
+A Windows controller action mod built on [ReKHCoM](https://github.com/MatyMeatBoy/ReKHCoM). Requires your own supported USA game dump.
 
-Fast, card-free Sora combat for Kingdom Hearts: Chain of Memories on ReKHCoM.
+![Kingdom Hearts Chain of Memories: Zwebti Mix](mod/action-edition/branding/kingdom-hearts-chain-of-memories-zwebti-mix-logo.png)
 
-**[Download for Windows](https://github.com/ramizwebti/Zwebti-Mix/releases/latest/download/Zwebti-Mix.exe)**
+Three normal attacks branch into complete native finishers through direction, hold timing and the selected magic element. There is no finisher menu. A contact-earned assist gauge calls one of14 native allies while Sora keeps fighting. His original portrait, HP, MP and assist gauge sit at bottom right.
 
-Open the EXE, choose Story or Practice Arena, and select your own unmodified USA GBA game file when asked. Use **Check for updates** in the launcher for future releases. Progress and controls stay separate from application updates. No ROM is included.
+- **Play:** open **Kingdom Hearts Chain of Memories - Zwebti Mix 0.10.1.exe**, then choose Story or Practice Arena.
+- **Controller tree:** see [the combat guide](mod/action-edition/README.md) or open the interactive `START_HERE.html` included with the release.
+- **Native inventory:** see [catalog scope and coverage](mod/action-edition/development/NATIVE_CATALOG.md).
+- **Build:** see [launcher/README.md](launcher/README.md).
+- **Validation:** see [launcher/VALIDATION.md](launcher/VALIDATION.md).
 
-| Action | Key |
-|---|---|
-| Move | Arrow keys |
-| Attack / earned combo finisher | X |
-| Jump / dodge | Z / C |
-| Cast / change spell | Q / E |
-| Practice menu | Backspace |
+Version 0.10.1 refreshes this mod's logo and app identity while retaining 0.10's native animations, multi-hit sequences and screen effects. Full campaign balance and physical-controller verification remain incomplete. Story/Practice profiles stay outside immutable version folders. GitHub publishing remains pending Composure tools. No other Kingdom Hearts project is changed.
 
-Connect three basic hits, then press Attack again for Blitz or Air Rush. Practice includes a training target, crowds, Axel and Jafar.
-
-## Build
-
-Supply your owned USA ROM locally and the LLVM-MinGW/SDL3 toolchain described in the [Windows build notes](port/windows64/README.md). Run `python port/windows64/build_windows64.py --regions us --jobs 3`, then `python mod/action-edition/package.py`. Release files are one EXE and its update manifest. The helper-test workflow requires no ROM; it is not a full game build.
-
-## Credits
-
-Built on [MatyMeatBoy/ReKHCoM](https://github.com/MatyMeatBoy/ReKHCoM) and [Pheenoh/khcom](https://github.com/Pheenoh/khcom). Source and third-party notices are preserved. Kingdom Hearts belongs to its respective owners; this is an independent fan modification. Full campaign balance and hardware testing remain in progress.
+Independent fan modification. No ROM, saves or player data are included. Original source and third-party notices retain their terms.

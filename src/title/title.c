@@ -144,6 +144,13 @@ void task_title_logo_2(TitleLogoWork* work) {
     s16 x;
     s16 y;
 
+#ifdef PLATFORM_PC
+    if (PortTitleBrandUse((gGameState.flags & GAME_FLAG_RIKU_TITLE) != 0,
+                         ((ObjPalette*)work->sprites[4].palette)->index)) {
+        return;
+    }
+#endif
+
     for (i = 0; i < 6; i++) {
 #ifndef VERSION_JP
         if (i == 1 && !(gGameState.flags & GAME_FLAG_RIKU_TITLE)) {
@@ -186,6 +193,10 @@ void task_title_logo_2(TitleLogoWork* work) {
 
 void task_title_logo_3(TitleLogoWork* work) {
     s32 i;
+
+#ifdef PLATFORM_PC
+    PortTitleBrandStop();
+#endif
 
     for (i = 0; i < 6; i++) {
         ReleaseObjTiles(work->sprites[i].tiles);

@@ -5,6 +5,11 @@
 
 #ifdef PLATFORM_PC
 #include "engine.h"
+#include "port/port_practice.h"
+#include "port/port_action_game.h"
+#include "key.h"
+#include "gba/keys.h"
+#include "battle.h"
 #endif
 #include "malloc.h"
 #include "fade.h"
@@ -380,6 +385,15 @@ void mode_battle_0(u32 mode) {
 }
 
 void mode_battle_1() {
+#ifdef PLATFORM_PC
+    /* The practice target is durable; allow leaving any drill through the
+     * same mode-exit cleanup used by ordinary completed debug battles. */
+    if(PortPracticeActive() && (GetKeysPressed()&SELECT_BUTTON)) {
+        ExitBattle();
+        return;
+    }
+    PortActionCaptureInput();
+#endif
     TaskPoolUpdate(&gBtlWork->taskPools[2]);
     TaskPoolDraw(&gBtlWork->taskPools[2]);
 

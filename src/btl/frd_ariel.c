@@ -23,7 +23,13 @@
 #include "types.h"
 #include <stddef.h>
 #include "sprite_palettes.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_assist.h"
+#endif
 #include "btl.h"
+#ifdef PLATFORM_PC
+#include "port/port_action_game.h"
+#endif
 
 static const AnimDef sFrdArielAnimDefs[3] = {
     { gFrdArielFrames, gFrdArielAnims, gFrdArielTiles, 0 },
@@ -80,6 +86,9 @@ void task_frd_ariel_0(FrdArielWork* work, FrdArgs* args) {
     body->groundZ = 0;
     work->hoverZ = -0x1000;
     body->z = -0x1000;
+#ifdef PLATFORM_PC
+    work->tiles = PortActionAssistSpawnTiles(args->mainSide, work->tiles);
+#endif
     work->palette = LoadObjPalette(gArielPalette, sizeof(gArielPalette));
     AnimInit(&work->anim, NULL, NULL);
     AnimChangeWithDef(sFrdArielAnimDefs, &work->anim, 1, 0, work->tiles);
@@ -110,7 +119,11 @@ u8 task_frd_ariel_1(FrdArielWork* work) {
 
     body = &work->body;
 
-    if (gGameState.world != WORLD_ATLANTICA) {
+    if (gGameState.world != WORLD_ATLANTICA
+#ifdef PLATFORM_PC
+        && !(work->mainSide && PortActionCombatRules())
+#endif
+    ) {
         return 0;
     }
 

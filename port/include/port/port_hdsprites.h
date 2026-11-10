@@ -45,6 +45,9 @@ void PortHdSpritesWorldFallback(int fallback);
 /* Press Start's authored light, smoothly interpolated and shared by port-owned menus. */
 int PortHdMenuLightDraw(SDL_Renderer* renderer, float x, float y, float size, uint64_t ticks, float shade, float white);
 void PortHdMenuAssetsWarm(SDL_Renderer* renderer);
+/* Complete Zwebti Mix title image, requested only by the native logo task.
+ * Draw after the native/HD scene overlays, before port menus. */
+void PortTitleBrandDraw(SDL_Renderer* renderer, float ox, float oy, float scale);
 #endif
 void PortHdSpritesShutdown(void);
 /* The HD title's illustration (assets/hd/title/art/sora.png): 1 once it is loaded (its width/height in *aspect); queued
