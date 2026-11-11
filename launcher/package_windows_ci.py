@@ -153,8 +153,10 @@ def download_runtime(folder):
     environment = dict(os.environ, GH_HOST='github.com', GH_PROMPT_DISABLED='1')
     environment.pop('GH_DEBUG', None)
     metadata = subprocess.run(['gh', 'release', 'view', tag, '--repo', REPOSITORY,
-        '--json', 'tagName,isDraft,assets'], check=True, capture_output=True,
+        '--json', 'tagName,isDraft,assets'], check=False, capture_output=True,
         text=True, env=environment, timeout=60)
+    if metadata.returncode:
+        raise RuntimeError('Cannot read the fixed draft runtime release: ' + metadata.stderr.strip())
     release = json.loads(metadata.stdout)
     if release.get('tagName') != tag or release.get('isDraft') is not True:
         raise ValueError('Runtime input must come from the exact current-version draft release')

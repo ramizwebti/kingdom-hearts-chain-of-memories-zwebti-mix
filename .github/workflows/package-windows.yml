@@ -15,6 +15,12 @@ jobs:
   package:
     if: github.repository == 'ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
+    # GitHub shows draft releases only to identities with push access. This
+    # short-lived token is scoped to this repository; the script only reads
+    # its fixed draft asset and never publishes. Checkout stores no token.
+    # https://docs.github.com/en/rest/releases/releases#list-releases
+    permissions:
+      contents: write
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
