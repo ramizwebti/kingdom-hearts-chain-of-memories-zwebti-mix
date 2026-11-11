@@ -34,6 +34,7 @@ typedef char AdapterIntegerSize[(sizeof(int)==4)?1:-1];
 '''
 
 ACTOR_ABI = r'''
+#include <stddef.h>
 /* Retain the production headers' full size assertions and verify fields used
  * across collision, task and target adapters at their cartridge offsets. */
 typedef char AdapterActorFlags[(offsetof(BtlObj,flags)==0x34)?1:-1];
