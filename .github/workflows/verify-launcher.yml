@@ -13,6 +13,9 @@ jobs:
       - name: Check runtime icon preservation without executing a game
         shell: powershell
         run: python -m unittest discover -s launcher/tests -p test_stamp_runtime_icon.py
+      - name: Check hosted packaging boundaries without game files
+        shell: powershell
+        run: python -m unittest discover -s launcher/tests -p test_package_windows_ci.py
       - name: Check native source inventory and catalog client
         shell: powershell
         run: |

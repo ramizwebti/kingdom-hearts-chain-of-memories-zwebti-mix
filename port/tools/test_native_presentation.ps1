@@ -25,7 +25,14 @@ $caption = $ast.Find({ param($node)
     $node.Left.VariablePath.UserPath -eq 'projectTitle'
 }, $false)
 if ($null -eq $caption) { throw 'The launcher project caption was not found.' }
-$projectTitle = [string] $caption.Right.SafeGetValue()
+$captionLiteral = $caption.Right.Find({ param($node)
+    $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
+}, $false)
+if ($null -eq $captionLiteral -or
+    $caption.Right.Extent.Text.Trim() -ne $captionLiteral.Extent.Text.Trim()) {
+    throw 'The launcher caption must be a single literal string.'
+}
+$projectTitle = [string] $captionLiteral.Value
 if ($projectTitle -ne 'Kingdom Hearts Chain of Memories: Zwebti Mix') {
     throw 'The presentation fixture must remain scoped to Chain of Memories.'
 }
