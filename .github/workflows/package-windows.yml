@@ -1,0 +1,45 @@
+name: "Kingdom Hearts Chain of Memories: Zwebti Mix - Package Windows release"
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_sha256:
+        description: "Approved SHA256 of this version's fixed runtime ZIP on its draft release"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: package-kingdom-hearts-chain-of-memories-zwebti-mix
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.repository == 'ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runtime archive validation without game files
+        shell: powershell
+        run: |
+          python -m unittest discover -s launcher/tests -p test_package_windows_ci.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package the exact verified runtime and check isolated upgrades
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_SHA256: ${{ inputs.runtime_sha256 }}
+        run: |
+          python launcher/package_windows_ci.py --runtime-sha256 "$env:RUNTIME_SHA256"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload only verified Windows deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Windows-${{ github.run_id }}
+          path: build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development/packaging/artifacts/*
+          if-no-files-found: error
+          retention-days: 14

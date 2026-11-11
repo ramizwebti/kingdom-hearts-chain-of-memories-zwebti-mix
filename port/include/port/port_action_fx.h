@@ -8,6 +8,13 @@ void PortActionFxReset(void);
 /* GPU cache invalidation; does not consume or clear simulation effects. */
 void PortActionFxRendererReset(void);
 void PortActionFxTick(void);
+enum PortActionFxContactPower {
+    PORT_ACTION_FX_CONTACT_LIGHT,
+    PORT_ACTION_FX_CONTACT_NORMAL,
+    PORT_ACTION_FX_CONTACT_HEAVY
+};
+/* Same-tick contacts at the exact same point share one accent at the highest
+ * weight. This coalesces presentation only, never damage or resource rewards. */
 void PortActionFxHit(int32_t x, int32_t y, int32_t z, unsigned power);
 enum PortActionFxCueKind {
     PORT_ACTION_FX_SLASH,

@@ -87,6 +87,7 @@ static u16 ActionDirections(u16 keys);
 static void ActionSelectMeleeTarget(BtlSoraWork* work, u16 held);
 static void ActionApproachMeleeTarget(BtlSoraWork* work);
 static BtlObj* ActionLiveMeleeTarget(void);
+static int ActionQuickFireSpawnOffset(BtlSoraWork* work, BtlObj** target);
 
 typedef struct ActionAssistArgs {
     TaskDesc* nativeDesc;
@@ -705,6 +706,43 @@ enum BtlSoraState {
 };
 
 #ifdef PLATFORM_PC
+/* A link follows the real strike and its closed hit phase, not a button
+ * timer. Keep the final two authored recovery poses and a per-strike minimum
+ * follow-through; the unused tail can yield to one deliberate next action. */
+static int ActionMeleeRecoveryReady(BtlSoraWork* work) {
+    static const u8 followThrough[3]={6,8,10};
+    unsigned step=sActionCurrent.comboStep;
+    return sActionIndependent && !ActionFullNative() && step>=1 && step<=3 &&
+        work->state==BTL_SORA_STATE_COMBO && work->steps>=2 &&
+        work->anim.frameCount && work->anim.frame+2>=work->anim.frameCount &&
+        ActionAnimationTicks(work)>=sBtlSoraSwingHitFrames[work->swingSpeed]+followThrough[step-1];
+}
+
+/* These named states contain only the recovery after their final native
+ * strike/projectile. Unknown native states retain their complete ownership. */
+static int ActionNativeRecoveryReady(BtlSoraWork* work) {
+    if (!sActionIndependent || !ActionFullNative() || BgFxIsActive()) return 0;
+    switch (work->state) {
+    case BTL_SORA_STATE_RECOVER:
+    case BTL_SORA_STATE_RAID_CATCH:
+    case BTL_SORA_STATE_SLIDING_DASH_END:
+    case BTL_SORA_STATE_ZANTETSUKEN_END:
+        return work->stateTimer>0 && AnimGetFrame(&work->anim)>=1;
+    case BTL_SORA_STATE_ARS_ARCANUM_FINISH:
+        return work->stateTimer>=40 && work->actor.z>=work->actor.groundZ;
+    default: return 0;
+    }
+}
+
+static void ActionDefensiveBreak(BtlSoraWork* work) {
+    /* Accepted input alone cannot earn combo progress: a startup cancel
+     * forfeits that unperformed strike. Finished/active swings may continue. */
+    if (sActionIndependent && sActionCurrent.comboStep &&
+        work->state==BTL_SORA_STATE_COMBO && work->steps==0)
+        PortActionInterrupt(&sActionState);
+    else PortActionDefend(&sActionState);
+}
+
 static int ActionCanDefend(BtlSoraWork* work) {
     BtlObj* act=&work->actor;
     if (act->hp<=0 || (act->badStatus!=BAD_STATUS_NONE && act->badStatus!=BAD_STATUS_CONFUSE) ||
@@ -719,7 +757,7 @@ static int ActionCanDefend(BtlSoraWork* work) {
         } else if (sActionCurrent.nativeMove==MOVE_SONIC_BLADE) {
             if (work->state!=BTL_SORA_STATE_SONIC_BLADE || work->comboCount<6 ||
                 ActionAnimationTicks(work)<64 || (sActionImpactFrame && sinceHit<8)) return 0;
-        } else return 0;
+        } else if (!ActionNativeRecoveryReady(work)) return 0;
     }
     return sActionIndependent || work->state==BTL_SORA_STATE_IDLE ||
         work->state==BTL_SORA_STATE_AIRBORNE || work->state==BTL_SORA_STATE_LAND ||
@@ -921,9 +959,46 @@ static u8 ActionAssistUpdate(ActionAssistWork* work) {
     ActionAssistNative native=ActionAssistReadNative(work);
     int effectBefore=BgFxIsActive()!=0;
     int playerPresentation=sActionIndependent && (ActionFullNative() || ActionQuickMagic());
+    /* These physical friends never write BGFX/fades. Their non-conflicting
+     * movement and strikes may overlap native technique windup/recovery.
+     * Keep the player's repeated-hit windows exclusive: companion native
+     * code can call MakeOpponentsHittable, which must not add finisher hits. */
+    int physicalFriend=work->nativeDesc==&gTaskDescFrdGoofy ||
+        work->nativeDesc==&gTaskDescFrdBeast || work->nativeDesc==&gTaskDescFrdAladdin ||
+        work->nativeDesc==&gTaskDescFrdAriel;
+    int overlap=physicalFriend && !playerPresentation;
+    /* Ariel reverses a native pass by making every opponent hittable again.
+     * Defer that update across Sora's open normal-hit phase so the reset
+     * cannot reopen his current strike. Startup/recovery still overlap. */
+    int normalContact=work->nativeDesc==&gTaskDescFrdAriel && sActionWork &&
+        sActionIndependent && !ActionFullNative() && sActionCurrent.comboStep &&
+        sActionWork->state==BTL_SORA_STATE_COMBO && sActionWork->steps==1;
     int paused;
+    if (physicalFriend && playerPresentation && sActionWork) {
+        if (ActionQuickMagic()) overlap=sActionWork->stateTimer<14;
+        else switch (sActionCurrent.nativeMove) {
+        case MOVE_BLITZ: {
+            unsigned pose=AnimGetFrame(&sActionWork->anim);
+            /* Airborne pose 7 rewinds to the still-active pose 6 next tick.
+             * An assist reset here would reopen that same native strike. */
+            overlap=sActionWork->state!=BTL_SORA_STATE_BLITZ_STRIKE ||
+                (pose!=6 && !(pose==7 && sActionWork->actor.z<sActionWork->actor.groundZ));
+            break;
+        }
+        case MOVE_SONIC_BLADE:
+            overlap=sActionWork->state==BTL_SORA_STATE_SONIC_BLADE &&
+                (ActionAnimationTicks(sActionWork)<22 || ActionAnimationTicks(sActionWork)>64);
+            break;
+        case MOVE_ARS_ARCANUM:
+            overlap=(sActionWork->state==BTL_SORA_STATE_ARS_ARCANUM && sActionWork->stateTimer!=12) ||
+                (sActionWork->state==BTL_SORA_STATE_ARS_ARCANUM_FINISH && sActionWork->stateTimer>39);
+            break;
+        default: overlap=ActionNativeRecoveryReady(sActionWork);break;
+        }
+    }
     if (!effectBefore) work->ownsEffect=0;
-    paused=work->native && (playerPresentation || (effectBefore && !work->ownsEffect));
+    paused=work->native && (normalContact || (playerPresentation && !overlap) ||
+        (effectBefore && !work->ownsEffect && !overlap));
     if (paused!=work->paused && ActionTraceEnabled())
         PortLog("action: assist-pause frame=%u move=%u paused=%u player=%u effect=%u owned=%u",
             (unsigned)gFrameCounter,(unsigned)work->move,paused,playerPresentation,effectBefore,(unsigned)work->ownsEffect);
@@ -1614,9 +1689,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
         if (actionMotion) pressed |= sActionDispatchPressed;
         {
             /* Dodge button: the second tap of a d-pad double tap. */
-            u16 dodge = PortTakeDodge(held, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0);
+            u16 dodge = actionMotion ? PortPeekDodge(held, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0) :
+                PortTakeDodge(held, (act->flags & BTLOBJ_FLAG_FACING_LEFT) != 0);
 
-            if (dodge != 0) {
+            if (dodge != 0 && (!actionMotion || ActionCanDefend(work))) {
                 work->tapTimers[dodge == DPAD_LEFT ? 0 : 1] = 13;
                 pressed |= dodge;
                 if (actionMotion) actionDodge = dodge;
@@ -1682,7 +1758,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
          * before the engine accepts that attack or spends its resource. */
         act->flags &= ~BTLOBJ_FLAG_CARD_ACTION_PENDING;
         sActionQueued = 0;
-        PortActionInterrupt(&sActionState);
+        ActionDefensiveBreak(work);
     }
 #endif
 
@@ -1756,6 +1832,11 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
                 /* The actor has accepted the action. Rejected requests never spend MP. */
                 int counter = sActionState.counterFrames && sActionPending.comboStep;
                 if (PortActionCommit(&sActionState, &sActionPending)) {
+                    if (ActionTraceEnabled() && ActionMeleeRecoveryReady(work))
+                        PortLog("action: recovery-link frame=%u command=%u next=%u ticks=%u anim=%u pose=%u",
+                            (unsigned)gFrameCounter,(unsigned)sActionCurrent.command,
+                            (unsigned)sActionPending.command,ActionAnimationTicks(work),
+                            (unsigned)AnimGetId(&work->anim),(unsigned)AnimGetFrame(&work->anim));
                     if (ActionTraceEnabled() && work->state == BTL_SORA_STATE_COMBO &&
                         !sActionPending.comboStep)
                         PortLog("action: link frame=%u from=%u to=%u", (unsigned)gFrameCounter,
@@ -2637,10 +2718,15 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             work->attacks[1] = sActionCurrent.airborne ? &sBtlSoraAirSwing2 : &sBtlSoraSwing2;
             work->attacks[2] = sActionCurrent.airborne ? &sBtlSoraAirSwing3 : &sBtlSoraSwing3;
             if (!sActionCurrent.airborne) {
-                if (sActionCurrent.comboStep==1) sActionGroundPattern=(sActionGroundPattern+1)%3;
-                if (sActionGroundPattern==1) {
-                    work->attacks[0]=&sBtlSoraSwing2;work->attacks[1]=&sBtlSoraSwing1;
-                } else if (sActionGroundPattern==2) work->attacks[0]=&sBtlSoraSwing1Wide;
+                if (sActionCurrent.comboStep==1) {
+                    u16 intent=sActionState.bufferedHeld;
+                    sActionGroundPattern=(intent&PORT_ACTION_MODIFIER) && (intent&PORT_ACTION_UP) ? 1 :
+                        (intent&(PORT_ACTION_UP|PORT_ACTION_DOWN)) ? 2 : 0;
+                    if (ActionTraceEnabled()) PortLog("action: opener frame=%u pattern=%u",(unsigned)gFrameCounter,
+                        (unsigned)sActionGroundPattern);
+                }
+                if (sActionGroundPattern==1) work->attacks[0]=&sBtlSoraAirSwing1Hop;
+                else if (sActionGroundPattern==2) work->attacks[0]=&sBtlSoraSwing1Wide;
             }
             /* Bounded approach uses the normal solid collision correction. */
             DisableBtlSoraPassThrough(work);
@@ -2790,8 +2876,8 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
 #ifdef PLATFORM_PC
     if (actionCancel && ActionCanDefend(work) &&
         !(act->btl->flags & BTL_FLAG_FIELD_HIDDEN)) {
-        if (sActionIndependent && ActionFullNative() &&
-            (sActionCurrent.nativeMove==MOVE_BLITZ || sActionCurrent.nativeMove==MOVE_SONIC_BLADE)) {
+        ActionDefensiveBreak(work);
+        if (sActionIndependent && ActionFullNative()) {
             FadeToOriginal(FADE_MODE_BLACK,8);
             SetBattleZoom(8,Q_8_8(1),gBtlWork->x2,gBtlWork->y2);
         }
@@ -2812,7 +2898,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             m4aSongNumStart(work->groundSongs[2]);
         }
         sActionIndependent = 0;
-        PortActionInterrupt(&sActionState);
+        if (actionCancel==1) PortClearDodge();
         if (ActionTraceEnabled())
             PortLog("action: cancel frame=%u kind=%s", (unsigned)gFrameCounter,
                     actionCancel == 1 ? "dodge" : actionCancel == 3 ? "guard" : "jump");
@@ -4736,6 +4822,7 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
     }
     case BTL_SORA_STATE_FIRE: {
         BtlObj* enemy;
+        s32 spawnOffset = 18432;
 
         timer = 27;
 #ifdef PLATFORM_PC
@@ -4769,6 +4856,9 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
 
             enemy = act->btl->actor2;
+#ifdef PLATFORM_PC
+            spawnOffset = ActionQuickFireSpawnOffset(work, &enemy);
+#endif
 
             if (enemy != NULL) {
                 targetZ = enemy->z - (enemy->centerHeight << 8);
@@ -4777,10 +4867,10 @@ s32 task_btl_sora_1(BtlSoraWork* work) {
             }
 
             if (act->flags & BTLOBJ_FLAG_FACING_LEFT) {
-                BgFxStartFire(work->variant[0], act->x - 18432, act->y, act->z - 3584,
+                BgFxStartFire(work->variant[0], act->x - spawnOffset, act->y, act->z - 3584,
                               act->originX - 51200, act->originY, targetZ, TRUE, attack);
             } else {
-                BgFxStartFire(work->variant[0], act->x + 18432, act->y, act->z - 3584,
+                BgFxStartFire(work->variant[0], act->x + spawnOffset, act->y, act->z - 3584,
                               act->originX + 51200, act->originY, targetZ, FALSE, attack);
             }
         } else if (timer == 27 && (s16)work->stateTimer > timer) {
@@ -7272,6 +7362,42 @@ static int ActionTargetUsable(BtlObj* target) {
         BTLOBJ_FLAG_UNHITTABLE | BTLOBJ_FLAG_DEFEATED | BTLOBJ_FLAG_INVULNERABLE));
 }
 
+/* Fire's first authored collision is 28 pixels behind its 72-pixel origin.
+ * A close melee victim can stand behind that box after a successful approach.
+ * Move only this quick cast's origin when the unchanged first box would miss;
+ * the real projectile still owns every active frame, hit and native effect. */
+static int ActionQuickFireSpawnOffset(BtlSoraWork* work, BtlObj** target) {
+    BtlObj* enemy;
+    BtlObj* act;
+    int forward, offset, direction;
+    if (!work || work!=sActionWork || !gBtlWork || !target ||
+        !PortActionCombatActive() || !sActionIndependent ||
+        !ActionQuickMagic() || sActionCurrent.command!=PORT_ACTION_FIRE)
+        return 72*256;
+    /* The native selected pointer is only a captured candidate. Validate live
+     * membership before reading it; a despawned actor must not guide the cast. */
+    enemy=ListPoolFirst(&gBtlWork->pool);
+    while (enemy && enemy!=*target) enemy=ListPoolNext(&enemy->node);
+    if (!enemy || !ActionTargetUsable(enemy)) {
+        *target=NULL;
+        return 72*256;
+    }
+    act=&work->actor;
+    direction=(act->flags&BTLOBJ_FLAG_FACING_LEFT) ? -1 : 1;
+    forward=(enemy->x-act->x)*direction;
+    if (forward<0 || forward>=44*256) return 72*256;
+    if (CanAttackBoxHitBtlObj(enemy,act->x+direction*44*256,act->y,
+            act->z-14*256,8,8,16)) return 72*256;
+    offset=forward+28*256;
+    if (offset<28*256) offset=28*256;
+    if (offset>72*256) offset=72*256;
+    /* Preserve the projectile's physical depth/height and immunity rules.
+     * This never turns an off-axis or unreachable victim into a melee hit. */
+    if (!CanAttackBoxHitBtlObj(enemy,act->x+direction*(offset-28*256),
+            act->y,act->z-14*256,8,8,16)) return 72*256;
+    return offset;
+}
+
 /* Never dereference a remembered task pointer before proving it is still a
  * live member of the battle's actor pool. Enemy destruction may reuse slots. */
 static BtlObj* ActionLiveMeleeTarget(void) {
@@ -7292,14 +7418,25 @@ static BtlObj* ActionLiveMeleeTarget(void) {
 static void ActionSelectMeleeTarget(BtlSoraWork* work, u16 held) {
     BtlObj* act=&work->actor;
     BtlObj* enemy=ListPoolFirst(&gBtlWork->pool);
+    BtlObj* retained=ActionLiveMeleeTarget();
     int best=0x7fffffff;
+    int continuing=sActionCurrent.comboStep>1 || sActionCurrent.finisher;
     if ((held&(PORT_ACTION_LEFT|PORT_ACTION_RIGHT))==PORT_ACTION_LEFT)
         act->flags|=BTLOBJ_FLAG_FACING_LEFT;
     else if ((held&(PORT_ACTION_LEFT|PORT_ACTION_RIGHT))==PORT_ACTION_RIGHT)
         act->flags&=~BTLOBJ_FLAG_FACING_LEFT;
     sActionTarget=NULL;
+    if (continuing && retained &&
+        (sActionCurrent.finisher ? PortActionFinisherTargetScore : PortActionTargetScore)(
+            retained->x-act->x,retained->y-act->y,retained->z-act->z,held,
+            (act->flags&BTLOBJ_FLAG_FACING_LEFT)!=0,1)>=0) {
+        sActionTarget=retained;
+        if (ActionTraceEnabled()) PortLog("action: target-keep frame=%u x=%d y=%d targetX=%d targetY=%d",
+            (unsigned)gFrameCounter,act->x>>8,act->y>>8,retained->x>>8,retained->y>>8);
+    }
     for (;enemy;enemy=ListPoolNext(&enemy->node)) {
         int score;
+        if (sActionTarget==retained && continuing && retained) break;
         if (!ActionTargetUsable(enemy)) continue;
         score=(sActionCurrent.finisher ? PortActionFinisherTargetScore : PortActionTargetScore)(
             enemy->x-act->x,enemy->y-act->y,enemy->z-act->z,
@@ -7307,6 +7444,8 @@ static void ActionSelectMeleeTarget(BtlSoraWork* work, u16 held) {
         if (score>=0 && score<best) { best=score; sActionTarget=enemy; }
     }
     act->btl->actor2=sActionTarget;
+    if (ActionTraceEnabled() && retained && sActionTarget!=retained)
+        PortLog("action: target-switch frame=%u found=%u",(unsigned)gFrameCounter,sActionTarget!=NULL);
     if (ActionTraceEnabled())
         PortLog("action: target frame=%u found=%u x=%d y=%d dx=%d dy=%d",(unsigned)gFrameCounter,
             sActionTarget!=NULL,act->x>>8,act->y>>8,
@@ -7330,16 +7469,16 @@ static void ActionApproachMeleeTarget(BtlSoraWork* work) {
     int left=(act->flags & BTLOBJ_FLAG_FACING_LEFT)!=0;
     int desiredX=act->originX+(left?-8:8)*256,desiredY=act->y;
     int dx,dy;
-    /* A miss does not launch Sora forward. A real nearby target receives a
-     * small, collision-respecting nudge once per complete swing. */
+    /* A miss does not launch Sora forward. Bound travel to the attack's
+     * short-range selection envelope and ordinary solid collision response. */
     if (!target) return;
     desiredX=target->x+(left?24:-24)*256;
     desiredY=target->y;
     if ((left && desiredX>act->x)||(!left && desiredX<act->x)) desiredX=act->x;
     dx=PortActionApproachStep(act->x,act->originX,desiredX,
-        sActionCurrent.finisher?512:256,(sActionCurrent.finisher?16:8)*256);
+        sActionCurrent.finisher?1280:512,(sActionCurrent.finisher?48:24)*256);
     dy=PortActionApproachStep(act->y,act->originY,desiredY,
-        128,(sActionCurrent.finisher?6:4)*256);
+        sActionCurrent.finisher?512:256,(sActionCurrent.finisher?24:12)*256);
     act->x+=dx; act->y+=dy;
     if ((dx||dy) && ActionTraceEnabled())
         PortLog("action: approach frame=%u dx=%d dy=%d",(unsigned)gFrameCounter,dx,dy);
@@ -7349,6 +7488,9 @@ void PortActionPlayerMeleeHit(void) {
     unsigned old, readyBefore;
     if (!PortActionCombatActive() || !sActionIndependent || !sActionCurrent.comboStep ||
         (sActionWork->state!=BTL_SORA_STATE_COMBO && !sActionCurrent.finisher)) return;
+    if (ActionTraceEnabled())
+        PortLog("action: melee-contact frame=%u command=%u step=%u",(unsigned)gFrameCounter,
+            (unsigned)sActionCurrent.command,(unsigned)sActionCurrent.comboStep);
     old=sActionState.mp;
     readyBefore=sActionState.finisherFrames;
     if (PortActionRestoreOnHit(&sActionState) && ActionTraceEnabled())
@@ -7499,6 +7641,7 @@ static s32 UpdateActionSora(BtlSoraWork* work) {
         /* Finish an existing independent action with its own damage source,
          * even when controls are disabled or the battle enters its ending. */
         PortActionInterrupt(&sActionState);
+        PortClearDodge();
         sActionPressedLatched = 0;
         sActionAuxPressedLatched=0;
         sActionGuardLatched = 0;
@@ -7531,7 +7674,6 @@ static s32 UpdateActionSora(BtlSoraWork* work) {
     input.spellBusy = BgFxIsActive() != 0;
     if (PortActionPendingNative(&sActionState,&pendingNative)) {
         nativeAllowed=ActionNativeEnvironmentReady(pendingNative,input.airborne);
-        sActionState.bufferedHeld=input.held;
     }
     /* Hit reactions take priority. Never cancel damage by raising a fresh action request. */
     input.interrupted = act->hp <= 0 ||
@@ -7543,9 +7685,12 @@ static s32 UpdateActionSora(BtlSoraWork* work) {
         act->delayedDamage != 0;
     ready = work->state == BTL_SORA_STATE_IDLE || work->state == BTL_SORA_STATE_AIRBORNE ||
         (work->state == BTL_SORA_STATE_LAND && act->z >= act->groundZ);
-    /* Playing melee animations own this state until AnimIsFinished above.
-     * Repeated Attack presses can fill one queue slot, never restart a pose. */
-    input.canAct = ready && nativeAllowed && !input.interrupted &&
+    /* Early links are an option, not an earlier start for the player's
+     * natural combo-grace countdown while the original recovery still plays. */
+    input.comboGracePaused=!ready && ActionMeleeRecoveryReady(work);
+    /* Only the closed hit phase and authored recovery poses can admit the
+     * next action. Queuing earlier never restarts or skips an active strike. */
+    input.canAct = (ready || ActionMeleeRecoveryReady(work)) && nativeAllowed && !input.interrupted &&
         !(act->flags & BTLOBJ_FLAG_CARD_ACTION_PENDING) &&
         !(gBtlWork->flags & BTL_FLAG_PLAYER_CARD_ACTION);
     if (pressed & A_BUTTON) input.pressed |= PORT_ACTION_ATTACK;
@@ -7553,11 +7698,12 @@ static s32 UpdateActionSora(BtlSoraWork* work) {
     if (pressed & R_BUTTON) input.pressed |= PORT_ACTION_NEXT_MAGIC;
     input.pressed |= auxPressed;
     PortActionTick(&sActionState, &input);
+    if (input.interrupted) PortClearDodge();
     if (PortActionPendingAssist(&sActionState,&pendingNative) &&
         PortActionTryStartAssist(pendingNative)==PORT_ASSIST_STARTED) {
         PortActionCommitAssist(&sActionState,pendingNative);
     }
-    if (sActionGuardDispatch) PortActionInterrupt(&sActionState);
+    if (sActionGuardDispatch && ActionCanDefend(work)) ActionDefensiveBreak(work);
     if (PortActionPeek(&sActionState, &sActionPending)) {
         /* BGFX is shared by the cartridge engine; avoid knowingly replacing an active effect. */
         if ((sActionPending.command==PORT_ACTION_NATIVE_TECHNIQUE &&

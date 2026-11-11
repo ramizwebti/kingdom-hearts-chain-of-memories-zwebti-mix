@@ -40,6 +40,7 @@ extern Mode gModeBattle;
 
 /* Frames a dodge press waits for the battle code to take it. */
 #define DODGE_PENDING_FRAMES 6
+#define ACTION_DODGE_PENDING_FRAMES 10
 /* Frames the return-stocked-cards button is held before it acts (0.5 s). */
 #define UNSTOCK_HOLD_FRAMES 30
 
@@ -713,7 +714,7 @@ uint16_t PortInputResolve(uint32_t keys) {
         keys |= KEY_L | KEY_R;
     /* Dodge button: a press is kept for a few frames for the battle code. */
     if (dodge && !sDodgeHeld)
-        sDodgePending = DODGE_PENDING_FRAMES;
+        sDodgePending = action ? ACTION_DODGE_PENDING_FRAMES : DODGE_PENDING_FRAMES;
     else if (sDodgePending > 0)
         sDodgePending--;
     /* A link battle reads both players' keys from the link, so there the button is the d-pad double tap itself
@@ -766,15 +767,23 @@ int PortActionGuardHeld(void) {
 /* Battle code: the dodge button acts as the second tap of a d-pad double tap
    toward the held direction, or the way the character faces. Returns that
    direction's key, or 0 without a pending press. */
-int PortTakeDodge(int held, int facingLeft) {
+int PortPeekDodge(int held, int facingLeft) {
     if (sDodgePending == 0)
         return 0;
-    sDodgePending = 0;
     if (held & KEY_LEFT)
         return KEY_LEFT;
     if (held & KEY_RIGHT)
         return KEY_RIGHT;
     return facingLeft ? KEY_LEFT : KEY_RIGHT;
+}
+
+void PortClearDodge(void) { sDodgePending=0; }
+
+/* Classic and Riku callers retain their original consume-on-read behavior. */
+int PortTakeDodge(int held, int facingLeft) {
+    int direction=PortPeekDodge(held,facingLeft);
+    PortClearDodge();
+    return direction;
 }
 
 /* Deck editor: 1 once per press of the dodge binding (place the held card). */

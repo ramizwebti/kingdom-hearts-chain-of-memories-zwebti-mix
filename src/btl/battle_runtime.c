@@ -38,6 +38,9 @@
 #include "port/port.h"
 #include "port/port_action_game.h"
 #include "port/port_action_enemy.h"
+#include "port/port_action_pressure.h"
+static PortActionPressure sActionPressure;
+static u32 sLastActionShadowAttackFrame;
 #endif
 #include "mode.h"
 #include "obj.h"
@@ -168,6 +171,10 @@ void BtlWorkInit() {
     u8* dest;
     u8* src;
     CpuFill32(0, gBtlWork, sizeof(BtlWork));
+#ifdef PLATFORM_PC
+    PortActionPressureReset(&sActionPressure);
+    sLastActionShadowAttackFrame=gFrameCounter-12;
+#endif
     gBtlWork->phase = BTL_PHASE_START;
     gBtlWork->fadeExcludedPalettes = 0xFFFF0000;
     gBtlWork->gravity = 0x42;
@@ -1773,6 +1780,9 @@ void ReleaseEnemyBtlObj(BtlObj* obj) {
     BtlObj* self = obj->self;
 
     if (self == obj) {
+#ifdef PLATFORM_PC
+        PortActionPressureForget(&sActionPressure,(uintptr_t)self);
+#endif
         ListPoolRemove(&self->node, &gBtlWork->pool);
 
         if (!(self->kindFlags & EMY_KIND_FLAG_NO_COLLIDER)) {
@@ -2015,8 +2025,6 @@ void SetBattleActorPosition(s32 x, s32 y, s32 z) {
 }
 
 #ifdef PLATFORM_PC
-static u32 sLastActionShadowAttackFrame;
-
 int PortActionShadowIndependent(const BtlObj* actor) {
     return actor != NULL && actor->kind == ENEMY_SHADOW && PortActionCombatRules() &&
         !(gBtlWork->flags & (BTL_FLAG_BOSS_BATTLE | BTL_FLAG_HUM_BATTLE | BTL_FLAG_TUTORIAL));
@@ -2028,9 +2036,21 @@ static int ActionShadowTraceEnabled(void) {
     return trace != NULL && trace[0] != '\0' && trace[0] != '0';
 }
 
+void PortActionEnemyContact(BtlObj* actor) {
+    if(!PortActionShadowIndependent(actor) || actor->hp<=0 || actor->damage<=0 ||
+       (actor->flags & BTLOBJ_FLAG_HURT) ||
+       !(actor->flags & (BTLOBJ_FLAG_IN_CARD_ACTION | BTLOBJ_FLAG_CARD_ACTION_PENDING))) return;
+    /* Keep only this interrupted attack's reservation. Repeated contacts in
+     * the same hurt reaction cannot refresh it or freeze the entire crowd. */
+    if(PortActionPressureReserve(&sActionPressure,(uintptr_t)actor,gFrameCounter) &&
+       ActionShadowTraceEnabled())
+        PortLog("action: crowd opening frame=%u ticks=%u at=%d,%d",
+            (unsigned)gFrameCounter,PORT_ACTION_PRESSURE_HOLD_TICKS,actor->x>>8,actor->y>>8);
+}
+
 static u8 RequestActionShadowAttack(BtlObj* actor) {
     BtlObj* other;
-    unsigned active = 0;
+    unsigned active = 0, reserved = 0;
 
     if (!PortActionShadowIndependent(actor)) return FALSE;
     /* Requests are consumed even when the crowd budget is full. They never
@@ -2045,19 +2065,22 @@ static u8 RequestActionShadowAttack(BtlObj* actor) {
             BTLOBJ_FLAG_GRAVITY_PENDING | BTLOBJ_FLAG_HAZARD_PENDING |
             BTLOBJ_FLAG_WARP_PENDING | BTLOBJ_FLAG_FREEZE_PENDING))) return TRUE;
 
+    if(PortActionPressureHeld(&sActionPressure,(uintptr_t)actor,gFrameCounter)) return TRUE;
     for (other = ListPoolFirst(&gBtlWork->pool); other != NULL;
             other = ListPoolNext(&other->node)) {
-        if (other->hp > 0 && (other->flags &
-                (BTLOBJ_FLAG_IN_CARD_ACTION | BTLOBJ_FLAG_CARD_ACTION_PENDING))) active++;
+        if(other->hp<=0) continue;
+        if (other->flags &
+                (BTLOBJ_FLAG_IN_CARD_ACTION | BTLOBJ_FLAG_CARD_ACTION_PENDING)) active++;
+        else if(PortActionPressureHeld(&sActionPressure,(uintptr_t)other,gFrameCounter)) reserved++;
     }
     /* Preserve the authored 14/31-frame tells. At most three enemies may
      * wind up or attack together, and new starts are spaced by twelve ticks. */
-    if (active >= 3 || (u32)(gFrameCounter - sLastActionShadowAttackFrame) < 12) return TRUE;
+    if (active + reserved >= 3 || (u32)(gFrameCounter - sLastActionShadowAttackFrame) < 12) return TRUE;
     sLastActionShadowAttackFrame = gFrameCounter;
     actor->flags |= BTLOBJ_FLAG_CARD_ACTION_PENDING;
     if (ActionShadowTraceEnabled())
-        PortLog("action: shadow attack frame=%u concurrent=%u at=%d,%d",
-                (unsigned)gFrameCounter, active + 1, actor->x >> 8, actor->y >> 8);
+        PortLog("action: shadow attack frame=%u concurrent=%u reserved=%u at=%d,%d",
+                (unsigned)gFrameCounter, active + 1, reserved, actor->x >> 8, actor->y >> 8);
     return TRUE;
 }
 #endif

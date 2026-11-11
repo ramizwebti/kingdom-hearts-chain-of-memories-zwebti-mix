@@ -114,7 +114,12 @@ def scenarios():
         dict(name="classic-fallback",entry=0,action=False,frames=650,keys=["60-63:A"]+taps(180,600,18),shots=[200,350,600]),
         dict(name="riku-fallback",entry=0,riku=True,frames=650,keys=["60-63:A"]+taps(180,600,18),shots=[200,350,600]),
         dict(name="visual-combo",visual=True,preset="training",frames=740,keys=taps(180,700,6),shots=list(range(180,661,4))),
-        dict(name="visual-crowd",visual=True,preset="mixed",frames=450,keys=["100-101:CAST"]+taps(150,410,6),shots=list(range(90,391,4))),
+        dict(name="visual-crowd",visual=True,preset="mixed",frames=750,
+             keys=["150-195:GUARD","196-197:CAST","220-240:GUARD",
+                   "245-246:DODGE+RIGHT","280-281:A+LEFT",
+                   "295-315:GUARD+LEFT","370-371:A+LEFT",
+                   "400-401:A","440-441:A","460-461:DODGE+LEFT","500-520:GUARD+RIGHT"],
+             shots=list(range(180,541,4))+[650,720]),
         dict(name="visual-menu",visual=True,preset="training",frames=450,keys=["350-351:SELECT"],shots=[300,430]),
         dict(name="visual-cast-wait",visual=True,preset="training",frames=300,keys=["180-181:CAST","198-199:CAST"],shots=[180,195,200,215,240,280]),
     ])
@@ -138,6 +143,17 @@ def parse(log):
         re.findall(r'action: chain frame=(\d+) hits=(\d+) damage=(\d+)',log)]
     strikes=[dict(frame=int(a),command=int(b),timer=int(c)) for a,b,c in
         re.findall(r'action: strike frame=(\d+) command=(\d+) timer=(\d+)',log)]
+    recovery_links=[dict(zip(('frame','command','next','ticks','anim','pose'),map(int,row))) for row in
+        re.findall(r'action: recovery-link frame=(\d+) command=(\d+) next=(\d+) ticks=(\d+) anim=(\d+) pose=(\d+)',log)]
+    def finished_or_linked(command, following):
+        if any(command['frame']<=end['frame']<following['frame'] and end['command']==command['id']
+               for end in completions): return True
+        # Only performed normal strikes may use an authored recovery link.
+        # Full native techniques still require their own completion/cancel.
+        return command['id'] in NORMALS and any(
+            command['frame']<link['frame']<=following['frame'] and link['command']==command['id'] and
+            link['next']==following['id'] and any(command['frame']<=strike['frame']<link['frame'] and
+                strike['command']==command['id'] for strike in strikes) for link in recovery_links)
     native_segments=[dict(frame=int(a),move=int(b),segment=int(c)) for a,b,c in
         re.findall(r'action: native-segment frame=(\d+) move=(\d+) segment=(\d+)',log)]
     native_completions=[dict(zip(('frame','command','move','elapsed','state'),map(int,row))) for row in
@@ -185,7 +201,7 @@ def parse(log):
             statuses=[h for h in status_contacts if c['frame']<=h['frame']<next_frame],
             damage=any(h['damage']>0 for h in contacts if c['frame']<=h['frame']<next_frame) or
                 any(c['frame']<=h['frame']<next_frame for h in native_contacts)))
-    return dict(commands=commands,contacts=contacts,strikes=strikes,starts=starts,
+    return dict(commands=commands,contacts=contacts,strikes=strikes,starts=starts,recovery_links=recovery_links,
         native_segments=native_segments,native_completions=native_completions,
         native_contacts=native_contacts,native_sequences=native_sequences,
         status_contacts=status_contacts,
@@ -196,8 +212,9 @@ def parse(log):
         deliberate_cancels=cancels,
         complete_before_next=all(any(c['frame']<=end['frame']<following['frame'] and end['command']==c['id']
             for end in completions) for c,following in zip(commands,commands[1:]) if c['id']in MELEE),
-        complete_or_defended=all(any(c['frame']<=end['frame']<following['frame'] and end['command']==c['id']
-            for end in completions) or any(c['frame']<cancel['frame']<following['frame']for cancel in cancels)
+        complete_or_linked=all(finished_or_linked(c,following)
+            for c,following in zip(commands,commands[1:]) if c['id']in MELEE),
+        complete_or_defended=all(finished_or_linked(c,following) or any(c['frame']<cancel['frame']<following['frame']for cancel in cancels)
             for c,following in zip(commands,commands[1:]) if c['id']in MELEE),
         menus=list(map(int,re.findall(r'practice: menu frame=(\d+)',log))),
         hp_changes=hp,hp_loss=sum(old-new for _,old,new in hp if old>new),
@@ -277,11 +294,11 @@ def run_case(case,args,guest,host,rom):
                 if c['command']==NATIVE and len(following)==3:
                     post_ender.extend(following)
             complete=[s for s in data['native_sequences']if s['completion']]
-            passed=passed and data['best_chain']>=6 and len(complete)>=2 and all(c['contact']is not None for c in enders+post_ender) and data['complete_before_next'] and all(c['id']==(1,2,3,NATIVE)[i%4] for i,c in enumerate(data['commands'])) and all(s['segments']==[1,2,3] and s['contacts'] and s['damage'] and s['completion']['elapsed']>=150 for s in complete)
+            passed=passed and data['best_chain']>=6 and len(complete)>=2 and all(c['contact']is not None for c in enders+post_ender) and data['complete_or_linked'] and all(c['id']==(1,2,3,NATIVE)[i%4] for i,c in enumerate(data['commands'])) and all(s['segments']==[1,2,3] and s['contacts'] and s['damage'] and s['completion']['elapsed']>=150 for s in complete)
         elif case['name']in('one-press-one-swing','held-one-swing'):
             passed=passed and len(data['commands'])==1 and data['commands'][0]['id']==1 and len(data['animation_completions'])==1
         elif case['name']=='aerial-contact':passed=passed and any(c['air'] for c in data['commands']) and data['best_chain']>=3 and sum(s['completion']is not None and s['segments']==list(range(1,8)) and bool(s['contacts']) and s['damage'] for s in data['native_sequences'])>=3 and data['complete_or_defended']
-        elif case['name']=='whiff-completes-in-place':passed=passed and [c['id']for c in data['commands']]==[1,2,3] and [s['command']for s in data['strikes']]==[1,2,3] and [s['command']for s in data['animation_completions']]==[1,2,3] and not data['contacts'] and not data['native_contacts'] and data['complete_before_next'] and len(set((x,y)for x,y,z in data['attack_positions']))==1
+        elif case['name']=='whiff-completes-in-place':passed=passed and [c['id']for c in data['commands']]==[1,2,3] and [s['command']for s in data['strikes']]==[1,2,3] and [s['command']for s in data['animation_completions']]==[1,2,3] and not data['contacts'] and not data['native_contacts'] and data['complete_or_linked'] and len(set((x,y)for x,y,z in data['attack_positions']))==1
         elif case['name']=='air-land-finisher':passed=passed and [c['id']for c in data['commands']]==[4,5,3,NATIVE] and bool(data['ender_contacts']) and any(s['segments']==[1,2,3] and s['completion']for s in data['native_sequences'])
         elif case['name']=='ground-jump-finisher':passed=passed and [c['id']for c in data['commands']]==[1,2,6,NATIVE] and bool(data['ender_contacts']) and any(s['segments']==list(range(1,8)) and s['completion']for s in data['native_sequences'])
         elif case['name']=='elemental-finisher-waits-for-landing':
@@ -312,7 +329,7 @@ def run_case(case,args,guest,host,rom):
                 passed=passed and sequence['segments']==list(range(1,case['expected_segments']+1)) and sequence['completion']is not None
                 if sequence and sequence['completion']:
                     finish=sequence['completion']['frame']
-                    passed=passed and sequence['completion']['elapsed']>=case['minimum_native_ticks'] and not any(c['frame']<finish for c in data['deliberate_cancels']) and data['complete_before_next']
+                    passed=passed and sequence['completion']['elapsed']>=case['minimum_native_ticks'] and not any(c['frame']<finish for c in data['deliberate_cancels']) and data['complete_or_linked']
                     if case['name']=='native-sonic-offensive-lock':
                         follow=[c for c in data['contact_commands']if c['accepted']>finish][:3]
                         passed=passed and [c['command']for c in follow]==[1,2,3] and all(c['contact']is not None for c in follow)
@@ -329,7 +346,7 @@ def run_case(case,args,guest,host,rom):
                 if expected=='Blitz':passed=passed and sequence['segments']==[1,2,3]
                 if expected=='Sonic Blade / Air Rush':passed=passed and sequence['segments']==list(range(1,8))
             if case.get('combo_route'):
-                passed=passed and [c['id']for c in data['commands']]==[1,2,3,NATIVE] and all(c['contact']is not None for c in data['contact_commands'][:3]) and data['complete_before_next']
+                passed=passed and [c['id']for c in data['commands']]==[1,2,3,NATIVE] and all(c['contact']is not None for c in data['contact_commands'][:3]) and data['complete_or_linked']
             if case.get('spell_route') and natives:
                 passed=passed and len(data['commands'])==1 and natives[0]['mp']==case['expected_mp']
                 if 'charge_minimum'in case:passed=passed and natives[0]['frame']>=240+case['charge_minimum']-1
@@ -350,7 +367,7 @@ def run_case(case,args,guest,host,rom):
         elif case['name']=='aerial-cast':passed=passed and any(c['name']=='Fire'and c['air']for c in data['commands']) and bool(data['cast_releases']) and data['first_cast_to_attack'] is not None and data['first_cast_to_attack']<=22
         elif case['name']=='spell-weave-preserves-three-normals':
             commands=data['commands'];sequence=data['native_sequences'][0]if data['native_sequences']else None
-            passed=passed and [c['id']for c in commands]==[1,2,13,3,NATIVE] and commands[-1]['name']=='Fire Raid' and [c['id']for c in commands if c['id']in NORMALS]==[1,2,3] and data['complete_before_next']
+            passed=passed and [c['id']for c in commands]==[1,2,13,3,NATIVE] and commands[-1]['name']=='Fire Raid' and [c['id']for c in commands if c['id']in NORMALS]==[1,2,3] and data['complete_or_linked']
             passed=passed and all(c['contact']is not None for c in data['contact_commands']if c['command']in NORMALS) and len(data['cast_releases'])==1 and data['cast_releases'][0]['timer']==14 and len(data['cast_recoveries'])==1 and data['cast_recoveries'][0]['timer']==20
             # Only three normal hits and one Fire are possible before the raid;
             # the third swing's synchronous delta must expose all four hits.
@@ -365,7 +382,9 @@ def run_case(case,args,guest,host,rom):
         elif case['name']=='practice-spell-exit':passed=passed and 'practice: title'in log and 'mode: mode_title'in log and len(data['commands'])==1
         elif case['name']=='practice-queued-retry':passed=passed and len(data['starts'])>=2 and len(data['commands'])==1
         elif case['name']=='visual-combo':passed=passed and data['best_chain']>=4 and bool(data['ender_contacts'])
-        elif case['name']=='visual-crowd':passed=passed and data['best_chain']>=1 and any(c['name']=='Fire'for c in data['commands']) and bool(data['cast_releases'])
+        elif case['name']=='visual-crowd':
+            passed=passed and data['best_chain']>=1 and 'action: melee-contact 'in log and any(c['name']=='Fire'for c in data['commands']) and bool(data['cast_releases'])
+            passed=passed and any(r['held'] for r in data['guard']) and any(r['kind']=='dodge' for r in data['deliberate_cancels']) and 'action: threat start 'in log
         elif case['name']=='visual-menu':passed=passed and bool(data['menus'])
         elif case['name']=='visual-cast-wait':passed=passed and [c['name']for c in data['commands']]==['Fire','Fire']
         elif case['name']=='native-counter':passed=passed and bool(data['perfect_dodges']) and bool(data['counters'])

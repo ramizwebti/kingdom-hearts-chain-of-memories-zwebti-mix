@@ -1,4 +1,4 @@
-name: "Kingdom Hearts Chain of Memories: Zwebti Mix - Windows launcher checks"
+name: "Kingdom Hearts Chain of Memories: Zwebti Mix - Windows combat and launcher checks"
 on:
   push:
   pull_request:
@@ -7,6 +7,25 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check controller combat logic without a ROM
+        shell: powershell
+        run: ./port/windows64/test_action_logic_ci.ps1
+      - name: Check runtime icon preservation without executing a game
+        shell: powershell
+        run: python -m unittest discover -s launcher/tests -p test_stamp_runtime_icon.py
+      - name: Check hosted packaging boundaries without game files
+        shell: powershell
+        run: python -m unittest discover -s launcher/tests -p test_package_windows_ci.py
+      - name: Check native source inventory and catalog client
+        shell: powershell
+        run: |
+          python port/tools/test_native_catalog.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $catalog = 'build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development/catalog'
+          python port/tools/build_native_catalog.py --out $catalog
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node port/tools/test_native_catalog_ui.cjs "$catalog/native_catalog.html"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check settings migration on Windows PowerShell
         shell: powershell
         run: ./port/tools/test_native_presentation.ps1

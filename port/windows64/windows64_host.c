@@ -41,7 +41,7 @@
 #include "../include/port/port_windows_cpu.h"
 
 #define KHCOM_PRODUCT_TITLE "Kingdom Hearts Chain of Memories: Zwebti Mix"
-#define KHCOM_PRODUCT_VERSION "0.10.1"
+#define KHCOM_PRODUCT_VERSION "0.11.0"
 
 static char sData[1024] = ".";
 static int sQuit;

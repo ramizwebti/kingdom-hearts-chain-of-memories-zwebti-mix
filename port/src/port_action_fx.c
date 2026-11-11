@@ -80,10 +80,28 @@ static ActionImpact* FxAllocate(int32_t x, int32_t y, int32_t z) {
     return fx;
 }
 void PortActionFxHit(int32_t x, int32_t y, int32_t z, unsigned power) {
-    ActionImpact* hit = FxAllocate(x, y, z);
+    static const uint8_t durations[3]={6,9,12};
+    ActionImpact* hit;
+    unsigned i;
+    if(power>PORT_ACTION_FX_CONTACT_HEAVY) power=PORT_ACTION_FX_CONTACT_HEAVY;
+    /* Several native hitboxes may resolve on one victim in the same tick.
+     * Keep one truthful bright contact instead of additive white noise.
+     * Already-aged contacts remain distinct beats of a multi-hit move. */
+    for(i=0;i<FX_COUNT;++i) {
+        hit=&sImpacts[i];
+        if(hit->life && hit->life==hit->duration && hit->kind==FX_IMPACT &&
+           hit->x==x && hit->y==y && hit->z==z) {
+            if(power>hit->power) {
+                hit->power=(uint8_t)power;
+                hit->life=hit->duration=durations[power];
+            }
+            return;
+        }
+    }
+    hit = FxAllocate(x, y, z);
     hit->kind = FX_IMPACT;
-    hit->power = power > 2 ? 2 : (uint8_t)power;
-    hit->life = hit->duration = hit->power == 2 ? 12 : 10;
+    hit->power = (uint8_t)power;
+    hit->life = hit->duration = durations[power];
 }
 void PortActionFxCue(int32_t x, int32_t y, int32_t z,
                      unsigned cue, int facingLeft, unsigned variant) {
@@ -320,20 +338,19 @@ void PortActionFxDraw(SDL_Renderer* renderer,float originX,float originY,float s
         blue=FxColor(0.35f,0.68f,1.0f,fade*fade*0.45f);
         white=FxColor(1.0f,0.98f,0.80f,fade*fade);
         if (fx->kind==FX_IMPACT) {
-            int final=fx->power==2;
-            unsigned rays=final?6:4;
-            float offset=(0.8f+age*(final?0.60f:0.40f))*scale;
+            unsigned rays=4+fx->power;
+            float offset=(0.8f+age*(0.30f+fx->power*0.15f))*scale;
             for (j=0;j<rays;++j) {
-                unsigned d=(j*(final?3:4)+(fx->seed&1))%16;
+                unsigned d=(j*16/rays+(fx->seed&1))%16;
                 float dx=sCircle[d][0],dy=sCircle[d][1];
                 FxRay(x+dx*offset,y+dy*offset,dx,dy,
-                      (1.0f+(final?6.0f:3.0f)*fade)*scale,
-                      (final?0.65f:0.45f)*scale,j&1?white:gold);
+                      (1.0f+(2.0f+fx->power*2.0f)*fade)*scale,
+                      (0.35f+fx->power*0.15f)*scale,j&1?white:gold);
             }
             /* Strong contact gets a short, weightier flash, not an expanding
              * full ring. No cue branch below emits this contact-only core. */
             if(age<3.0f)
-                FxStar(x,y,((final?6.0f:3.5f)-age)*scale,white);
+                FxStar(x,y,((3.0f+fx->power*1.5f)-age)*scale,white);
         } else if (fx->kind==PORT_ACTION_FX_SLASH || fx->kind==PORT_ACTION_FX_FINISHER) {
             if(fx->kind==PORT_ACTION_FX_FINISHER && fx->variant==1) {
                 FxRay(x-sign*3.0f*scale,y,-sign,0,14.0f*fade*scale,

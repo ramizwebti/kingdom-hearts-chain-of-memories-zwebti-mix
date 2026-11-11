@@ -20,6 +20,7 @@ HARNESS = r'''
 #include "btl_collision.h"
 #include "battle_work.h"
 #include "listpool.h"
+#include "engine_math.h"
 #include "port/port_action_game.h"
 
 static BtlWork sBattle;
@@ -29,20 +30,40 @@ static BtlObj sEnemy;
 static BtlObj sEnemy2;
 BtlWork* gBtlWork = &sBattle;
 BtlWork* gRikuBtlWork = &sOpponentBattle;
-static unsigned sFeedbackHits, sFeedbackDamage, sFxHits, sObserved, sMeleeContacts;
+static unsigned sFeedbackHits, sFeedbackDamage, sFxHits, sObserved, sMeleeCallbacks, sPressureContacts;
+static unsigned sLastFxPower;
 static int sAction = 1;
+static int sFinisher, sGuarding, sGuardFaces=1;
+static unsigned sGuardBlocks, sPlayerImpacts, sAssistContacts, sStatusContacts;
+static PortActionState sActionState;
 vu32 gFrameCounter;
 
 /* Only external presentation/adaptor endpoints are substituted. Collision,
- * damage scaling, guards, target iteration and pause selection are production. */
+ * damage scaling, guard routing, target iteration and pause selection are
+ * production. The fixture supplies actor/controller phase snapshots; native
+ * guard timing, move-task execution and resource accounting are tested in the
+ * controller/native suites, not reimplemented here. Math below is extracted
+ * unchanged from its production translation units. */
 int PortActionCombatRules(void) { return sAction; }
+int PortActionCombatActive(void) { return sAction; }
+const PortActionState* PortActionGameState(void) { return sAction ? &sActionState : 0; }
+int PortActionPlayerFinisherActive(void) { return sAction && sFinisher; }
+int PortActionPlayerGuarding(void) { return sAction && sGuarding; }
+int PortActionGuardFaces(s32 x,s32 y) { (void)x;(void)y;return sAction && sGuarding && sGuardFaces; }
+void PortActionGuardBlocked(unsigned attack) { (void)attack;++sGuardBlocks; }
+void PortActionPlayerImpact(unsigned attack) { (void)attack;++sPlayerImpacts; }
+void PortActionAssistContact(unsigned attack,unsigned damage) { (void)attack;(void)damage;++sAssistContacts; }
+void PortActionStatusContact(unsigned attack,unsigned kind,unsigned duration) {
+    (void)attack;(void)kind;(void)duration;++sStatusContacts;
+}
 void PortActionFeedbackHit(unsigned damage) { ++sFeedbackHits; sFeedbackDamage += damage; }
-void PortActionFxHit(s32 x, s32 y, s32 z, unsigned power) { ++sFxHits; }
+void PortActionFxHit(s32 x, s32 y, s32 z, unsigned power) { ++sFxHits; sLastFxPower=power; }
+void PortActionEnemyContact(BtlObj* target) { if(target==&sEnemy || target==&sEnemy2) ++sPressureContacts; }
 void PortActionObserveEnemyAttack(s32 x, s32 y, s32 z, s16 hx, s16 hy, s16 hz) { ++sObserved; }
-void PortActionPlayerMeleeHit(void) { ++sMeleeContacts; }
+void PortActionPlayerMeleeHit(void) { ++sMeleeCallbacks; }
 void CreateBtlPopTask(BtlObj* obj, s16 kind) { }
 void m4aSongNumStart(u16 song) { }
-u8 GetAngle(s32 x0, s32 y0, s32 x1, s32 y1) { return 0; }
+__PRODUCTION_MATH__
 #define EFFECT(name) void name(s32 x, s32 y, s32 z) { }
 EFFECT(BgFxStartBlizzardHit)
 EFFECT(BgFxStartEnemyHit)
@@ -60,6 +81,7 @@ static int run_tests(void) {
     BtlObj* previous;
     BtlObj* nested;
     sBattle.actor = &sPlayer;
+    sActionState.lastCommand=PORT_ACTION_GROUND_1;
     sBattle.actor3 = &sEnemy;
     sOpponentBattle.actor = &sEnemy;
     sEnemy.x = 100 * 256;
@@ -120,18 +142,20 @@ static int run_tests(void) {
     CHECK(sEnemy.damage == 24 && (sEnemy.flags & BTLOBJ_FLAG_DAMAGE_PENDING), 23);
     CHECK(sBattle.pendingHitStop == 3, 24);
     CHECK(sFeedbackHits == 1 && sFeedbackDamage == 24 && sFxHits == 1, 25);
-    CHECK(sMeleeContacts == 1, 49);
+    CHECK(sLastFxPower==1 && sPressureContacts==1, 65);
+    CHECK(sMeleeCallbacks == 1, 49);
 
     /* A weaker contact from the same frame cannot shorten its existing pause. */
     CHECK(ApplyAttackToBtlObj(12, &sEnemy) == ATTACK_RESULT_HIT, 26);
     CHECK(sBattle.pendingHitStop == 3 && sFeedbackHits == 2, 27);
-    CHECK(sMeleeContacts == 2, 50);
+    CHECK(sLastFxPower==0 && sPressureContacts==2, 66);
+    CHECK(sMeleeCallbacks == 2, 50);
     ++gFrameCounter;
     /* pendingHitStop intentionally still contains the prior frame's three. */
     CHECK(ApplyAttackToBtlObj(10, &sEnemy) == ATTACK_RESULT_HIT, 28);
     CHECK(sBattle.pendingHitStop == 2 && sEnemy.damage == 128, 29);
     CHECK(sFeedbackHits == 3 && sFeedbackDamage == 168, 30);
-    CHECK(sMeleeContacts == 2, 51); /* magic cannot restore melee MP */
+    CHECK(sMeleeCallbacks == 2, 51); /* magic does not dispatch melee contact */
 
     /* Native immunity/guard handling creates no successful-damage feedback. */
     sEnemy.flags = BTLOBJ_FLAG_GUARD_PHYSICAL;
@@ -144,7 +168,8 @@ static int run_tests(void) {
     sEnemy.hp = 0;
     CHECK(ApplyAttackToBtlObj(14, &sEnemy) == ATTACK_RESULT_HIT, 35);
     CHECK(sFeedbackHits == 3 && sFxHits == 3, 36);
-    CHECK(sMeleeContacts == 2, 52); /* guards, immunity and dead targets */
+    CHECK(sPressureContacts==3, 67); /* no opening from guard, immunity or death */
+    CHECK(sMeleeCallbacks == 2, 52); /* guards, immunity and dead targets */
 
     /* A real wide strike hits both targets and produces independent contacts. */
     sEnemy.hp = sEnemy2.hp = 100;
@@ -160,7 +185,7 @@ static int run_tests(void) {
     CHECK(sEnemy.damage == 24 && sEnemy2.damage == 24, 38);
     CHECK(sFeedbackHits == 5 && sFxHits == 5 && sBattle.pendingHitStop == 3, 39);
     CHECK(sObserved == 0, 40);
-    CHECK(sMeleeContacts == 4, 53); /* adapter/controller deduplicates per swing */
+    CHECK(sMeleeCallbacks == 4, 53); /* one dispatch per victim; real adapter deduplicates rewards */
 
     /* AI range probes cannot award a perfect dodge. Actual enemy dispatch
      * invokes its observer and keeps the authored incoming-damage pause. */
@@ -173,7 +198,7 @@ static int run_tests(void) {
     CHECK(ApplyAttackBox(14, 0, 0, 0, 2, 2, 2) == ATTACK_RESULT_HIT, 42);
     CHECK(sObserved == 1 && sPlayer.damage == 15 && sBattle.pendingHitStop == 16, 43);
     CHECK(sFeedbackHits == 5 && sFxHits == 5, 44);
-    CHECK(sMeleeContacts == 4, 54); /* enemy hits cannot restore player MP */
+    CHECK(sMeleeCallbacks == 4, 54); /* enemy hits cannot dispatch player melee contact */
 
     /* Incoming attacks may pause longer, but never poison a later player's
      * contact. Retain pendingHitStop=16 to exercise the production lifecycle. */
@@ -181,7 +206,7 @@ static int run_tests(void) {
     BtlSetAttackSource(&sPlayer);
     CHECK(ApplyAttackToBtlObj(12, &sEnemy) == ATTACK_RESULT_HIT, 47);
     CHECK(sBattle.pendingHitStop == 2 && sFeedbackHits == 6, 48);
-    CHECK(sMeleeContacts == 5, 55);
+    CHECK(sMeleeCallbacks == 5, 55);
 
     /* Classic action-disabled damage retains cartridge pause behavior. */
     BtlSetAttackSource(&sPlayer);
@@ -189,20 +214,36 @@ static int run_tests(void) {
     sBattle.pendingHitStop = 0;
     CHECK(ApplyAttackToBtlObj(14, &sEnemy) == ATTACK_RESULT_HIT, 45);
     CHECK(sBattle.pendingHitStop == 16 && sFeedbackHits == 6 && sFxHits == 6, 46);
-    CHECK(sMeleeContacts == 5, 56); /* classic behavior stays untouched */
-    /* Earned enders keep a short stronger beat, and cannot farm basic MP. */
+    CHECK(sMeleeCallbacks == 5, 56); /* classic behavior stays untouched */
+    /* Legacy physical ender IDs dispatch contact to the real melee adapter;
+     * that adapter/controller gates MP using its committed attack token. */
     sAction = 1;
     ++gFrameCounter;
     CHECK(ApplyAttackToBtlObj(85, &sEnemy) == ATTACK_RESULT_HIT, 57);
     CHECK(sBattle.pendingHitStop == 3, 58);
-    CHECK(sMeleeContacts == 5, 59);
+    CHECK(sMeleeCallbacks == 6, 59);
     ++gFrameCounter;
     CHECK(ApplyAttackToBtlObj(93, &sEnemy) == ATTACK_RESULT_HIT, 60);
     CHECK(sBattle.pendingHitStop == 3, 61);
-    CHECK(sMeleeContacts == 5, 62);
+    CHECK(sMeleeCallbacks == 7, 62);
     ++gFrameCounter;
     CHECK(ApplyAttackToBtlObj(12, &sEnemy) == ATTACK_RESULT_HIT, 63);
     CHECK(sBattle.pendingHitStop == 2, 64);
+    /* Controller phase snapshots drive the real physical-guard branches. */
+    BtlSetAttackSource(&sEnemy);sGuarding=1;sGuardFaces=1;
+    sPlayer.flags=BTLOBJ_FLAG_GUARD_PHYSICAL;sPlayer.invincibleTimer=0;
+    CHECK(ApplyAttackToBtlObj(14,&sPlayer)==ATTACK_RESULT_BLOCKED,68);
+    CHECK(sGuardBlocks==1 && sPlayer.invincibleTimer==0,69);
+    sGuardFaces=0;
+    CHECK(ApplyAttackToBtlObj(14,&sPlayer)==ATTACK_RESULT_HIT,70);
+    CHECK(sGuardBlocks==1 && sPlayer.damage==15,71);
+    sGuarding=0;sPlayer.invincibleTimer=0;
+    CHECK(ApplyAttackToBtlObj(14,&sPlayer)==ATTACK_RESULT_BLOCKED,72);
+    CHECK(sGuardBlocks==1 && sPlayer.invincibleTimer==30,73);
+    /* Full-native phase gives its real contact a stronger (bounded) beat. */
+    BtlSetAttackSource(&sPlayer);sFinisher=1;sEnemy.flags=0;++gFrameCounter;
+    CHECK(ApplyAttackToBtlObj(14,&sEnemy)==ATTACK_RESULT_HIT,74);
+    CHECK(sBattle.pendingHitStop==6 && sLastFxPower==2,75);
     BtlSetAttackSource(0);
     return 0;
 }
@@ -213,6 +254,23 @@ void _start(void) {
     __builtin_unreachable();
 }
 '''
+
+
+def production_math(path, signature):
+    """Include the real math body without linking unrelated engine services."""
+    source = (ROOT / path).read_text()
+    start = source.index(signature)
+    cursor = source.index('{', start) + 1
+    depth = 1
+    while depth:
+        depth += (source[cursor] == '{') - (source[cursor] == '}')
+        cursor += 1
+    return source[start:cursor]
+
+
+HARNESS = HARNESS.replace('__PRODUCTION_MATH__',
+    production_math('src/engine.c', 's32 Sqrt8(s32 value)') + '\n' +
+    production_math('src/game_state.c', 'u8 GetAngle(s32 x0, s32 y0, s32 x1, s32 y1)'))
 
 
 def run_elf32(path):
@@ -284,7 +342,7 @@ def main():
             status = run_elf32(executable)
         if status:
             raise SystemExit("Collision regression failed at check " + str(status))
-    print("PASS: 64 real collision routing, damage, per-frame pause, ender, feedback, attack-observer and melee-contact checks")
+    print("PASS: 75 real collision routing, damage, guard routing, pause, impact weight, pressure and feedback checks")
 
 
 if __name__ == "__main__":

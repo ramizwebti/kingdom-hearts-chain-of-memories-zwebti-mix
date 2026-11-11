@@ -1,31 +1,39 @@
-# Kingdom Hearts Chain of Memories: Zwebti Mix — validation
+# Kingdom Hearts Chain of Memories: Zwebti Mix â€” 0.11.0 validation
 
-Version **0.10.1**, checked on Windows on **November 9, 2026**. This update changes project artwork and title presentation, Windows identity, release naming and native Windows startup. Combat behavior remains the 0.10 implementation.
+Native checks completed on Windows in November 2026. Tested guest SHA256: `83b99a117f14fb17c6e7c72df7c9eb19e9d1fee7c49cf87830e0691df1b782e9`. Tested unchanged host SHA256: `96401afa24137e87317f13326448c8d5f7a64d6f85c29c9b6b76c4f77790de19`. The shipping SDL3 DLL is unchanged. These hashes also identify the staged runtime input; packaging must preserve them exactly.
 
-Tested, packaged and installed guest SHA256: `c0a02c81be4ff86301a8248574e3377a38dc8f37e5a7d5c03fddcaae2db08774`. Stamped Windows host SHA256: `c76f054f9df4f926519d313bb4ab64f7fc1595fbc23e513df05535e758f25106`. The original shipping SDL3 library is unchanged.
+## Native checks
 
-## Current checks
+| Suite | Passed | Scope |
+|---|---:|---|
+| Combat scenarios | 102/102 | Real normal/finisher contacts, elemental and advanced branches, spell weaving, defense, crowd/boss probes, Practice/Story and classic/Riku fallback |
+| Native dispatcher inventory | 124/124 | Actual native dispatch, tiers, lifetime, neutral recovery and task/shared-channel cleanup in isolated training |
+| Strict combat flow | 14/14 | Connected wide/rising openers, bounded offensive requests, startup/post-strike guard/roll, continuation expiry and final-impact defensive cleanup |
+| Established assists | 11/11 | Independent attacks, real earned gauge, healing after damage, session carry and safe Trinity/shared-effect scheduling |
+| Physical-assist overlap | 3/3 | Sora's three normal contacts and six Blitz contacts preserved beside actual Ariel damage |
+| Visual scenarios | 4/4 | Combo, mixed crowd with approach/guard/roll/Fire, menu and effect-channel wait |
+| HUD pipelines | 3/3 | Shipping pixels, documented HD development pipeline and Original-view HD-text fallback;363 captures, none missing |
 
-- **Seven focused native scenarios passed on these exact binaries**: Story title/reveal, Practice menu/title return, complete native Blitz, Options open/close, missing image fallback, invalid image fallback, and the preserved 0.10 guest as an original-title comparison. The fallback title BMPs are byte-identical to the original guest under the same host. Options stays above the new artwork; closing it restores the title. Full Blitz retains its three segments and native multi-hit sequence. Physical input was excluded only in the isolated fixtures; shipping controller behavior was not changed.
-- The actual Windows launcher was visually inspected: full silver Kingdom Hearts/gold Chain of Memories/pink Zwebti Mix wordmark, blossom ornaments, heart-only title-bar icon, full project caption, readable controls and no clipping. The final compiled EXE's embedded logo, icon and release archive match their checked inputs. PNG corners are transparent, and all ten Windows ICO sizes are present.
-- Native host ABI, mixed argument, low mapping, renderer/texture, input, title/fullscreen-control and BIOS checks passed. Real boot-marker tests returned the expected pre-guest errors and guest-requested exit; a Unicode synthetic guest path worked. Native startup uses a wide-character CRT entry, explicit SDL readiness and UTF-8 arguments. Earlier intermittent Windows process-start failures do not establish an SDL-shim defect; the final host is validated by actual execution.
-- **71 updater/store checks passed**, including complete fully qualified archive/checksum pairs and legacy-pair compatibility. C# compilation and PowerShell syntax checks passed. Icon stamping preserves executable code/data and non-icon resources; restamping the final host is byte-identical.
-- **Upgrade 0.10.0 → 0.10.1 passed twice in an isolated installation**, followed by the existing local installation. All **16 profile files stayed byte-identical**; 0.10.0 is retained. Archive CRC, exact tested runtime hashes, current logo/icon paths and ROM/save exclusions passed.
+All suites above use these exact guest/host hashes, isolated profiles and no gameplay cheats. Existing native game code executes through the unchanged host; no new local helper EXE was needed after the Norton reports. Three authored normal positions still precede the contextual fourth finisher. Finishers remain accessible after whiffs.
 
-Focused native results: `build/branding-v0101-shipping/report.json`. Icon/resource results: `build/branding-v0101-runtime-icon-verification.json`. Native host results: `build/branding-v0101-native-entry/validation.json`. These are ignored local build evidence, not player data for publication.
+The dense comparison shortens first-normal acceptance to Blitz admission from91 ticks in0.10.1 to61 ticks (181â†’272 versus181â†’242). Every normal still contacts. Blitz itself remains201 ticks with all three segments and six native contacts. This measures one scripted simulation route, not physical controller latency or a universal speed gain. Both deliberate wide/rising opening routes connect through three normals and full Blitz; the rising fixture lands before later normals, so it does not establish a new sustained air route.
 
-## Native catalog and combat reference
+Fire now retains its original collision geometry while moving only its quick-cast origin when a valid close forward target would otherwise stand behind the first native box. The three-normalâ†’Fireâ†’third-normalâ†’Fire Raid weave connects in the native test. The production geometry fixture covers mirrored facing, prior36px spacing, close26px spacing, depth/height and unusable/stale targets, and inactive/classic/other-actor exclusions.
 
-The metadata catalog was refreshed against the current presentation sources: **33,924 records**, 355 source inputs, all330 native attack definitions, all124 concrete Sora dispatcher entries and zero unresolved records. Independent denominator and actual-client filtering/pagination/details checks pass. It includes no cartridge image/palette bytes, ROMs or saves. Combat sprites/effects remain native; the supplied subtitle and heart are project branding assets.
+The portrait's private source now includes the full0x680 native normal/hurt/low-HP sheet; its displayed-face VRAM allocation remains0x280. Actual Tinker Bell/mixed captures show complete hurt faces. Ordinary enemy damage produces complete low-HP faces at68,42 and16HP, captured at least48 ticks after the preceding hit. Native face/body palettes and damage rules remain intact.
 
-The broader 0.10 reference passed102 combat scenarios,124 catalog execution cases,11 assist probes, four visual scenarios and three HUD modes on guest `3ffa8e5a04013b35da0a4f39c5137821b0b522c6f5bd412ed14f0dcd9dd756ff`. Those broad suites were **not rerun on the changed 0.10.1 guest**. Their exact prior evidence and limits are preserved in [VALIDATION-0.10.0.md](VALIDATION-0.10.0.md); the current release uses the focused checks above.
+HUD captures show one green player HP bar, one blue MP bar, a narrow gold assist gauge and the original face at bottom right. No old player HUD or control legend appears at top left. Native multi-hit flashes and finisher darkening remain. The HD development probe uses its documented opt-in; the host visibly renders/caches its HD enemy-HP pilot while the generic guest Settings line still reports HUD0. That line is not used as proof of the rendered pipeline.
 
-Physical controller feel, full campaign progression and encounter balance remain unverified. Other Kingdom Hearts projects remain outside this mod's scope.
+Local evidence is under the ignored Development folder's `validation/` subdirectories above. Logs, profiles, captures, ROMs and toolchains are not published.
 
-## GitHub restoration and research — November 10, 2026
+## Hosted source checks and packaging
 
-The full source and branding are restored at `ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix` (repository ID1453493588). Restored main commit `bb915b2affaefa4f8eabb0dc83d130979259c823` has tree `198354235e97184b8e9ae8dc3603149ddb33b202`, identical to local checkpoint `5b7351e1d9e24ea9fd9c5ecd5e6690c5d35b4276`.
+[The Windows source checks passed on GitHub](https://github.com/ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix/actions/runs/42961050506):116 meaningful controller routes,100,000 invariant steps, pressure/feedback/bounded FX,85 production targeting/Fire checks,75 collision checks,33 companion phase boundaries, full-source portrait/palette/lifecycle/layout checks, icon preservation, packaging archive boundaries, source catalog/client behavior, settings migration and updater/rollback checks. These are automated checks with simulated input, not physical-device testing.
 
-Published release `v0.10.1` uses source commit `1c45f8dfc8309a8adaf1191e3322405edf5460d0`, tree `c8341886869e0c22bb35d464a750dad9e6c91662`, identical to the original local release source `5d5086d6fcf02ec6a51cf3463b67ddb9b1bdee61`. All five uploaded assets (EXE, runtime ZIP, ZIP checksum, branding ZIP and native-catalog ZIP) have GitHub SHA256 digests matching their verified saved files. GitHub normalizes spaces in the EXE asset name to periods; its bytes are unchanged.
+After Norton flagged the locally generated feedback/pressure/routes/collision helpers, those helpers were stopped and remain blocked. Routine source checks and new launcher packaging run on GitHub's hosted Windows machines through Composure. Norton is kept enabled; no security setting is changed automatically. Native game validation reuses only the existing unchanged host. Existing cache safeguards remain active.
 
-No new EXEs were built or executed, gameplay files changed, installed settings altered, or native combat suites rerun during restoration/research. Existing test evidence above keeps its original scope. Live publishing is verified; the launcher's complete live download/install path remains untested. The current source audit and proposed acceptance criteria are in [COMBAT_RESEARCH.md](../mod/action-edition/development/COMBAT_RESEARCH.md).
+The new hosted packaging workflow accepts only the exact COM draft runtime asset and a verified SHA256. It must retain every runtime byte, build the final launcher, verify a synthetic0.10.1 upgrade and idempotent relaunch, preserve synthetic Story/Practice data and the previous version, then export only five qualified release deliverables. Final packaging execution and publication are still pending at this source checkpoint; do not label a package verified until its hosted manifest and server hashes have been checked.
+
+## Limits
+
+Physical controller feel, full campaign progression, encounter-wide balance and every possible enemy/technique interaction remain unverified. Shadow crowd reservations do not establish equivalent behavior for every enemy family. Automated checks do not prove that every player will find the combat fun. The original0.10.1 release and its evidence remain unchanged in [VALIDATION-0.10.1.md](VALIDATION-0.10.1.md). Other Kingdom Hearts projects remain outside this mod's scope.

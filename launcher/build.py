@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / 'port/windows64'))
 import build_cache as cache
 from stamp_runtime_icon import stamp_icon
 
-VERSION = '0.10.1'
+VERSION = '0.11.0'
 BRAND = 'kingdom-hearts-chain-of-memories-zwebti-mix'
 RELEASE = 'Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix'
 DEVELOPMENT = ROOT / 'build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development'

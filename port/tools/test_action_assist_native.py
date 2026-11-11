@@ -36,27 +36,27 @@ CASES=[
  dict(name='native-magic-accent',index=18,preset='training',frames=650,
       keys='180-181:TECHNIQUE',shots=[190,210,230,260,400,600]),
  dict(name='cloud-trinity-queued',index=73,preset='training',frames=1800,
-      keys='120-121:R,140-141:R,160-161:R,180-181:TECHNIQUE,200-201:A,230-231:A,265-266:A,310-345:A+MODIFIER',shots=[220,285,350,450,600,850,1250]),
+      keys='120-121:R,140-141:R,160-161:R,180-181:TECHNIQUE,300-301:A,330-331:A,365-366:A',shots=[220,350,440,490,600,850,1250]),
 ]
 earned_keys=[]
-for start in range(180,741,140):
+for start in range(180,901,180):
     earned_keys += [f'{start}-{start+1}:A',f'{start+30}-{start+31}:A',
-                   f'{start+65}-{start+66}:A',f'{start+105}-{start+110}:GUARD']
-earned_keys += ['900-935:ASSIST','970-980:GUARD','990-1000:RIGHT','1040-1041:A',
-               '1080-1090:GUARD','1120-1121:DODGE+LEFT']
-CASES.append(dict(name='simba-earned-gauge',index=None,preset='training',frames=1600,
-    keys=','.join(earned_keys),shots=[200,400,800,890,950,1050,1250,1500]))
+                   f'{start+65}-{start+66}:A',f'{start+105}-{start+165}:GUARD']
+earned_keys += ['1100-1135:ASSIST','1170-1180:GUARD','1190-1200:RIGHT','1240-1241:A',
+               '1280-1290:GUARD','1320-1321:DODGE+LEFT']
+CASES.append(dict(name='simba-earned-gauge',index=None,preset='training',frames=1800,
+    keys=','.join(earned_keys),shots=[200,400,800,1090,1150,1250,1450,1750]))
 CASES.append(dict(name='session-carry',index=None,preset='training',frames=1000,
     keys='180-181:A,210-211:A,245-246:A,300-301:ASSIST_NEXT,310-311:ASSIST_NEXT,320-321:R,330-331:R,340-341:WEAPON_NEXT,350-351:WEAPON_NEXT,360-361:WEAPON_NEXT,450-451:SELECT,550-551:A',
     shots=[200,280,400,500,600,800,950]))
 magic_keys=[]
-for start in range(180,741,140):
+for start in range(180,901,180):
     magic_keys += [f'{start}-{start+1}:A',f'{start+30}-{start+31}:A',
-                   f'{start+65}-{start+66}:A',f'{start+105}-{start+110}:GUARD']
-magic_keys += [f'{frame}-{frame+1}:ASSIST_NEXT' for frame in (855,865,875,885,895)]
-magic_keys += ['930-965:ASSIST','1010-1011:CAST','1100-1120:LEFT','1140-1141:RIGHT','1300-1310:GUARD']
-CASES.append(dict(name='mushu-earned-gauge-magic',index=None,preset='training',frames=2200,
-    keys=','.join(magic_keys),shots=[800,920,990,1030,1100,1300,1800,2100]))
+                   f'{start+65}-{start+66}:A',f'{start+105}-{start+165}:GUARD']
+magic_keys += [f'{frame}-{frame+1}:ASSIST_NEXT' for frame in (1055,1065,1075,1085,1095)]
+magic_keys += ['1130-1165:ASSIST','1210-1211:CAST','1300-1320:LEFT','1340-1341:RIGHT','1500-1510:GUARD']
+CASES.append(dict(name='mushu-earned-gauge-magic',index=None,preset='training',frames=2400,
+    keys=','.join(magic_keys),shots=[1000,1120,1190,1230,1300,1500,2000,2300]))
 
 def rows(log,kind):
     result=[]
@@ -68,6 +68,24 @@ def rows(log,kind):
     return result
 
 def run(case):
+    reference=None
+    if case['name']=='cloud-trinity-queued':
+        # Derive a fresh, short-lived request from this exact companion and
+        # normal string, rather than requiring a stale request to wait forever.
+        ref=dict(case,name='cloud-trinity-reference',frames=800,
+                 shots=[220,350,440,500,760])
+        reference=run(ref)
+        if not reference['passed'] or not reference['data']['assist-end']:
+            raise RuntimeError('cannot derive Trinity queue from valid native companion reference')
+        end=reference['data']['assist-end'][0]['frame']
+        normal_done=[r['frame'] for r in reference['data']['animation-complete'] if r['command']<=3]
+        if len(normal_done)!=3:
+            raise RuntimeError('Trinity reference must finish exactly three real normals')
+        release=end-20
+        charge=max(normal_done[-1]+1,release-25)
+        if charge>normal_done[-1]+34 or not 13<=release-charge<30:
+            raise RuntimeError('no legitimate charged-finisher queue window before companion exit')
+        case=dict(case,keys=case['keys']+f',{charge}-{release}:A+MODIFIER')
     folder=OUT/case['name'];folder.mkdir(parents=True,exist_ok=True)
     for name in ('host.log','kh_com.log')+tuple('host_shot_%d.bmp'%f for f in case['shots']):
         (folder/name).unlink(missing_ok=True)
@@ -89,7 +107,8 @@ def run(case):
     log=(folder/'kh_com.log').read_text(errors='replace') if (folder/'kh_com.log').exists() else ''
     data={kind:rows(log,kind) for kind in ['assist-start','assist-state','assist-pause','assist-end',
           'accepted','animation-complete','native-segment','native-complete','native-settled','hp','guard','dodge',
-          'accent-start','accent-state','finisher-contact','chain','assist-contact','assist-heal','session','cast-release']}
+          'accent-start','accent-state','finisher-contact','chain','assist-contact','assist-heal','session','cast-release',
+          'strike','melee-contact']}
     failures=[]
     if code: failures.append('process exit '+str(code))
     if re.search(r'CRASH|out of memory|assertion failed|runtime error:',log,re.I): failures.append('runtime fault')
@@ -118,8 +137,25 @@ def run(case):
         if not data['native-complete']: failures.append('full Sora finisher did not finish beside assist')
         if not any(r.get('paused') for r in data['assist-pause']): failures.append('assist not safely paused for player presentation')
     if case['name']=='cloud-trinity-queued':
-        if not any('Trinity Limit' in r['line'] for r in data['accepted']): failures.append('queued Trinity never accepted')
+        trinity=[r for r in data['accepted'] if 'Trinity Limit' in r['line']]
+        if not trinity: failures.append('queued Trinity never accepted')
         if not data['native-complete'] or not data['finisher-contact']: failures.append('queued Trinity did not finish with real contact')
+        if [r['id'] for r in data['accepted']]!=[1,2,3,20] or [r['command'] for r in data['strike']]!=[1,2,3]:
+            failures.append('queued Trinity must follow three legitimate normal positions')
+        # Cloud can knock the barrel outside normal reach before this string;
+        # three performed whiffs must still earn the fourth-input finisher.
+        # Contact-earned gauge is tested strictly in the two earned cases.
+        end=reference['data']['assist-end'][0]['frame']
+        if not release+1<end: failures.append('Trinity request did not actually wait for companion exit')
+        if trinity and not end<=trinity[0]['frame']<=release+42:
+            failures.append('Trinity overlapped companion or outlived its fresh request budget')
+        if trinity and any(r['frame']>=trinity[0]['frame'] for kind in ('assist-contact','assist-state') for r in data[kind]):
+            failures.append('native companion advanced or dealt damage after Trinity admission')
+        # The wrapper can remain nine frames longer while observing Trinity's
+        # new fade; require damage after its actual cleanup as an extra check.
+        cleanup=data['assist-end'][0]['frame'] if data['assist-end'] else 0
+        if any(r['frame']<max(end,cleanup) for r in data['finisher-contact']):
+            failures.append('Trinity damage occurred before companion finished')
     if case['name'] in ('tink-real-hurt','genie-real-hurt','bambi-serialized-after-hurt') and not data['active_damage']:
         failures.append('no observed real Sora damage while companion active')
     if case['name']=='tink-real-hurt' and not data['active_healing']:
@@ -128,11 +164,17 @@ def run(case):
         failures.append('no actual offensive companion collision damage')
     if case['name']=='bambi-serialized-after-hurt' and len(data['assist-start'])!=2:
         failures.append('two serialized independent assists not completed')
-    if case['name']=='simba-earned-gauge':
-        if len([r for r in data['accepted'] if r.get('id') in (1,2,3) and r['frame']<900])<15:
+    if case['name'] in ('simba-earned-gauge','mushu-earned-gauge-magic'):
+        before=1100 if case['name']=='simba-earned-gauge' else 1130
+        normals=[r['id'] for r in data['accepted'] if r['frame']<before]
+        contacts=[r['command'] for r in data['melee-contact'] if r['frame']<before]
+        if normals!=[1,2,3]*5 or contacts!=[1,2,3]*5:
             failures.append('ordinary contact string not played before earned assist')
-        if not data['assist-start'] or data['assist-start'][0]['frame']<900:
+        if not data['session'] or data['session'][0]['gauge']!=0:
+            failures.append('earned companion must start from zero session gauge')
+        if not data['assist-start'] or data['assist-start'][0]['frame']<before:
             failures.append('assist did not wait for real earned gauge and summon input')
+    if case['name']=='simba-earned-gauge':
         if not data['assist-contact']: failures.append('earned Simba has no actual damage')
     if case['name']=='session-carry':
         if len(data['session'])<2: failures.append('two fresh native encounters were not entered')
@@ -153,6 +195,9 @@ def run(case):
        failures=failures,data=data,screenshots=[str(folder/('host_shot_%d.bmp'%f)) for f in case['shots']],
        cheats=False,diagnostic_catalog=case['index'] is not None,
        guest_sha256=hashlib.sha256(GUEST.read_bytes()).hexdigest())
+    if reference is not None:
+        result['queue_reference']=dict(case=reference['case']['name'],end=reference['data']['assist-end'][0]['frame'],
+                                     charge=charge,release=release,guest_sha256=reference['guest_sha256'])
     (folder/'report.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(dict(name=case['name'],passed=result['passed'],failures=failures,
        start=[r['frame'] for r in data['assist-start']],end=[r['frame'] for r in data['assist-end']])),flush=True)

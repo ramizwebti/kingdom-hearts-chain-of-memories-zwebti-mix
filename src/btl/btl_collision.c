@@ -24,6 +24,7 @@
 #include "port/port_action_assist.h"
 #include "port/port_action_fx.h"
 #include "port/port_action_feedback.h"
+#include "port/port_action_enemy.h"
 #include "system_state.h"
 #endif
 
@@ -878,10 +879,17 @@ s32 ResolveAttackHit(BtlObj* hit, s32 index) {
 #ifdef PLATFORM_PC
     if (BtlGetAttackSource() == gBtlWork->actor && PortActionCombatRules() &&
         target != gBtlWork->actor && target->hp > 0 && target->damage > 0) {
+        unsigned power=PORT_ACTION_FX_CONTACT_NORMAL;
+        if(PortActionPlayerFinisherActive() || (attack->flags & ATTACK_FLAG_IS_SLEIGHT))
+            power=PORT_ACTION_FX_CONTACT_HEAVY;
+        else if(index>=12 && index<=65 && (index-12)%3<2)
+            power=PORT_ACTION_FX_CONTACT_LIGHT;
         PortActionFxHit(target->x, target->y, target->z - (target->centerHeight << 8),
-                        (PortActionPlayerFinisherActive() || (attack->flags & ATTACK_FLAG_IS_SLEIGHT)) ? 2 : 1);
-        if (!(attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON)))
+                        power);
+        if (!(attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON))) {
             PortActionPlayerImpact((unsigned)index);
+            PortActionEnemyContact(target);
+        }
         if (attack->flags & (ATTACK_FLAG_KIND_FRIEND | ATTACK_FLAG_KIND_SUMMON))
             PortActionAssistContact((unsigned)index,(unsigned)target->damage);
         PortActionFeedbackHit((unsigned)target->damage);
