@@ -60,7 +60,9 @@ enum {
     PORT_ACTION_MAGIC_COUNT = 7,
     PORT_ACTION_MAX_MP = 100,
     PORT_ACTION_BUFFER_FRAMES = 12,
+    PORT_ACTION_BUFFER_MAX_FRAMES = 42,
     PORT_ACTION_COMBO_FRAMES = 36,
+    PORT_ACTION_DEFENSE_COMBO_FRAMES = 54,
     PORT_ACTION_REGEN_DELAY = 90,
     PORT_ACTION_REGEN_INTERVAL = 6,
     PORT_ACTION_COUNTER_FRAMES = 75,
@@ -86,6 +88,7 @@ typedef struct PortActionInput {
     uint8_t airborne;
     uint8_t facingLeft;
     uint8_t canAct;
+    uint8_t comboGracePaused; /* an early recovery link is not the end-of-action grace period */
     uint8_t interrupted;
     uint8_t magicMenu;
     uint8_t spellBusy;
@@ -110,6 +113,7 @@ typedef struct PortActionState {
     uint16_t cooldown[PORT_ACTION_COMMAND_COUNT];
     uint16_t regenDelay;
     uint16_t comboFrames;
+    uint16_t defenseComboFrames; /* absolute continuation budget; defense cannot refresh it */
     uint16_t feedbackFrames;
     uint16_t lastCommand;
     uint16_t finisherFrames;
@@ -125,6 +129,7 @@ typedef struct PortActionState {
     uint8_t comboStep; /* count of accepted basic attacks in this chain */
     uint8_t comboAirborne;
     uint8_t bufferFrames;
+    uint8_t bufferAgeFrames; /* hard lifetime, including busy actor/effect-channel waits */
     uint8_t bufferedKind;
     uint8_t bufferedMagic;
     uint8_t airborne;
@@ -153,6 +158,9 @@ typedef struct PortActionState {
 
 void PortActionReset(PortActionState* state);
 void PortActionInterrupt(PortActionState* state);
+/* Voluntary defense preserves only earned sequence position for a bounded
+ * re-entry window. Damage/status interruption must still use Interrupt. */
+void PortActionDefend(PortActionState* state);
 void PortActionBeginDodge(PortActionState* state);
 int PortActionPerfectDodge(PortActionState* state);
 unsigned PortActionRestoreOnHit(PortActionState* state);

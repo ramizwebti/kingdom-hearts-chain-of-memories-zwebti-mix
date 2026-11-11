@@ -11,13 +11,14 @@ using System.Web.Script.Serialization;
 
 [assembly: AssemblyTitle("Kingdom Hearts Chain of Memories: Zwebti Mix")]
 [assembly: AssemblyProduct("Kingdom Hearts Chain of Memories: Zwebti Mix")]
-[assembly: AssemblyVersion("0.10.1.0")]
-[assembly: AssemblyFileVersion("0.10.1.0")]
+[assembly: AssemblyVersion("0.11.0.0")]
+[assembly: AssemblyFileVersion("0.11.0.0")]
 
 namespace ZwebtiMix {
     internal static class Program {
         internal const string ProjectTitle = "Kingdom Hearts Chain of Memories: Zwebti Mix";
-        internal const string SeedVersion = "0.10.1";
+        internal const string SeedVersion = "0.11.0";
+        internal const string UpdateRepository = "ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix";
         [STAThread]
         private static int Main(string[] args) {
             Application.EnableVisualStyles();
@@ -176,17 +177,18 @@ namespace ZwebtiMix {
 
         private void CheckUpdates() {
             ReleaseInfo next = null;
-            string repository = "";
+            string repository = Program.UpdateRepository;
             string config = Path.Combine(store.Root, "updates.json");
             if (File.Exists(config)) {
                 try {
                     var values = new JavaScriptSerializer().Deserialize<System.Collections.Generic.Dictionary<string, string>>(File.ReadAllText(config));
-                    if (values != null && values.ContainsKey("repository")) repository = values["repository"];
+                    if (values != null && values.ContainsKey("repository") &&
+                        !String.IsNullOrWhiteSpace(values["repository"]) &&
+                        !String.Equals(values["repository"], Program.UpdateRepository, StringComparison.OrdinalIgnoreCase)) {
+                        MessageBox.Show(this, "The update settings point to a different project. This launcher updates Kingdom Hearts Chain of Memories: Zwebti Mix only.", Program.ProjectTitle);
+                        return;
+                    }
                 } catch (Exception error) { MessageBox.Show(this, "The update settings could not be read: " + error.Message, Program.ProjectTitle); return; }
-            }
-            if (String.IsNullOrWhiteSpace(repository)) {
-                status.Text = "Updates will be available after the GitHub project is connected.";
-                return;
             }
             Run("Checking for updates...", delegate {
                 next = store.CheckForUpdate(repository);

@@ -8,7 +8,7 @@ import runpy
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / 'build/controller-tree-input'
+OUT = ROOT / 'build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development/native/out/controller-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 base = runpy.run_path(str(ROOT / 'port/tools/test_keyboard_tap_latch.py'))
 code = base['code'].split('int main(void) {')[0]
@@ -27,7 +27,6 @@ SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad* pad) { (void)pad;return padType;
 code = code.replace('static uint32_t GamepadKeys(SDL_Gamepad* pad) { (void)pad;return 0; }',
                     poll + 'static uint32_t GamepadKeys(SDL_Gamepad* pad);')
 code += base['function']('static uint32_t GamepadKeys(')
-code += base['function']('int PortTakeDodge(')
 code += base['function']('uint16_t PortInputActionHeld(')
 code += base['function']('uint16_t PortInputActionPressed(')
 config = (ROOT / 'port/src/port_config.c').read_text()
@@ -106,6 +105,14 @@ int main(void) {
     fresh();buttons[SDL_GAMEPAD_BUTTON_NORTH]=true;frame(1);assert(PortActionGuardHeld());
     buttons[SDL_GAMEPAD_BUTTON_NORTH]=false;frame(1);assert(!PortActionGuardHeld());
     buttons[SDL_GAMEPAD_BUTTON_WEST]=true;frame(1);assert(PortTakeDodge(16,0)==16);
+    fresh();buttons[SDL_GAMEPAD_BUTTON_WEST]=true;frame(0);
+    buttons[SDL_GAMEPAD_BUTTON_WEST]=false;
+    for(unsigned n=0;n<8;++n) {frame(0);assert(PortPeekDodge(16,0)==16);}
+    assert(PortTakeDodge(16,0)==16 && !PortPeekDodge(16,0));
+    fresh();buttons[SDL_GAMEPAD_BUTTON_WEST]=true;frame(0);
+    buttons[SDL_GAMEPAD_BUTTON_WEST]=false;
+    for(unsigned n=0;n<10;++n) frame(0);
+    assert(!PortPeekDodge(16,0));
     puts("PASS: production controller buttons/axes -> resolve -> combo tree, trigger charge, modifier, D-pad selection, earned assist, guard and roll. Device reports simulated; physical pad not asserted.");
     return 0;
 }

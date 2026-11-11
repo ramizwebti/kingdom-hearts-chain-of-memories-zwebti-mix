@@ -89,7 +89,7 @@ static void CheckRenderer(void) {
 static void CheckContactOwnership(void) {
     SDL_Surface* surface=SDL_CreateSurface(160,120,SDL_PIXELFORMAT_RGBA32);
     SDL_Renderer* renderer;
-    InkBounds normal,final;
+    InkBounds normal,medium,final;
     unsigned i,x,y;
     assert(surface);renderer=SDL_CreateSoftwareRenderer(surface);assert(renderer);
     for(i=0;i<4;++i) {
@@ -106,9 +106,11 @@ static void CheckContactOwnership(void) {
     }
     Clear(renderer);PortActionFxReset();PortActionFxHit(80,60,0,0);
     PortActionFxDraw(renderer,0,0,1);assert(SDL_FlushRenderer(renderer));normal=ReadInk(surface);
+    Clear(renderer);PortActionFxReset();PortActionFxHit(80,60,0,1);
+    PortActionFxDraw(renderer,0,0,1);assert(SDL_FlushRenderer(renderer));medium=ReadInk(surface);
     Clear(renderer);PortActionFxReset();PortActionFxHit(80,60,0,2);
     PortActionFxDraw(renderer,0,0,1);assert(SDL_FlushRenderer(renderer));final=ReadInk(surface);
-    assert(normal.count>0 && final.count>normal.count);
+    assert(normal.count>0 && medium.count>normal.count && final.count>medium.count);
     assert(final.right-final.left<28 && final.bottom-final.top<28);
     PortActionFxRendererReset();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);
     PortActionFxReset();
@@ -168,6 +170,23 @@ int main(void) {
     PortActionFxHit(0,0,0,0);PortActionFxHit(0,0,0,1);PortActionFxHit(0,0,0,2);
     for(i=0;i<10;++i) PortActionFxTick();assert(PortActionFxCount()==1);
     PortActionFxTick();PortActionFxTick();assert(PortActionFxCount()==0);
+    /* Same-tick overlapping hitboxes share one accent at the strongest tier.
+     * A later native hit remains a separate beat, even at the same point. */
+    for(i=0;i<20;++i) PortActionFxHit(12,34,56,0);
+    assert(PortActionFxCount()==1);
+    PortActionFxHit(12,34,56,2);PortActionFxHit(12,34,56,0);
+    assert(PortActionFxCount()==1);
+    for(i=0;i<11;++i) PortActionFxTick();assert(PortActionFxCount()==1);
+    PortActionFxTick();assert(PortActionFxCount()==0);
+    PortActionFxHit(0,0,0,0);PortActionFxTick();PortActionFxHit(0,0,0,0);
+    assert(PortActionFxCount()==2);
+    for(i=0;i<5;++i) PortActionFxTick();assert(PortActionFxCount()==1);
+    PortActionFxTick();assert(PortActionFxCount()==0);
+    /* The three weights have deliberately distinct finite lifetimes. */
+    PortActionFxHit(0,0,0,0);PortActionFxHit(100,0,0,1);PortActionFxHit(200,0,0,2);
+    for(i=0;i<6;++i) PortActionFxTick();assert(PortActionFxCount()==2);
+    for(i=0;i<3;++i) PortActionFxTick();assert(PortActionFxCount()==1);
+    for(i=0;i<3;++i) PortActionFxTick();assert(PortActionFxCount()==0);
     for(i=0;i<PORT_ACTION_FX_CUE_COUNT;++i) PortActionFxCue(1,2,3,i,1,999);
     assert(PortActionFxCount()==5);
     PortActionFxCue(1,2,3,PORT_ACTION_FX_CUE_COUNT,0,0);
@@ -175,8 +194,8 @@ int main(void) {
     for(i=0;i<6;++i) PortActionFxTick();assert(PortActionFxCount()==3);
     PortActionFxTick();PortActionFxTick();assert(PortActionFxCount()==0);
     /* An arriving finisher survives pressure from nearly expired sparks. */
-    for(i=0;i<12;++i) PortActionFxHit(0,0,0,0);
-    for(i=0;i<9;++i) PortActionFxTick();
+    for(i=0;i<12;++i) PortActionFxHit((int)i*256,0,0,0);
+    for(i=0;i<5;++i) PortActionFxTick();
     PortActionFxHit(0,0,0,2);PortActionFxTick();assert(PortActionFxCount()==1);
     for(i=0;i<11;++i) PortActionFxTick();assert(PortActionFxCount()==0);
     for(i=0;i<10000;++i) {
@@ -203,6 +222,6 @@ int main(void) {
 #ifdef PORT_ACTION_FX_RENDER_TEST
     CheckRenderer();CheckContactOwnership();CheckPixelGridAndVariants();
 #endif
-    puts("PASS: bounded contact FX, finite cues, native pixels, clip/state preservation and threat expiry");
+    puts("PASS: contact weight/coalescing, bounded FX, native pixels, clip/state preservation and threat expiry");
     return 0;
 }

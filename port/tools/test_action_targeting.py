@@ -14,7 +14,7 @@ from test_action_collision import run_elf32
 ROOT=Path(__file__).resolve().parents[2]
 
 def extract(source,name):
-    m=re.search(r'(?:static )?(?:BtlObj\*|int|void) '+name+r'\([^;{}]*\)\s*\{',source)
+    m=re.search(r'(?:static )?(?:BtlObj\*|int|void|u8) '+name+r'\([^;{}]*\)\s*\{',source)
     if not m: raise ValueError(name)
     cursor=m.end();depth=1
     while depth:
@@ -25,12 +25,14 @@ HARNESS=r'''
 #include "btl.h"
 #include "battle_work.h"
 #include "battle_actor_types.h"
+#include "btl_collision.h"
 #include "listpool.h"
 #include "port/port_action_target.h"
 #include <stddef.h>
 static BtlWork sBattle;
 BtlWork* gBtlWork=&sBattle;
 static BtlSoraWork sSora;
+static BtlSoraWork sOtherSora;
 static BtlSoraWork* sActionWork=&sSora;
 static BtlObj sEnemies[3];
 static BtlObj* sActionTarget;
@@ -49,6 +51,8 @@ __FUNCTIONS__
 static int run_tests(void) {
     unsigned i;
     PortActionInput in={0};PortActionIntent intent;
+    BtlObj* fireTarget;
+    int fireOffset;
     BtlObj* act=&sSora.actor;
     sBattle.actor=act;act->btl=&sBattle;
     ListPoolInit(&sBattle.pool);
@@ -81,7 +85,7 @@ static int run_tests(void) {
     ActionSelectMeleeTarget(&sSora,PORT_ACTION_RIGHT);CHECK(!sActionTarget,11);
     sEnemies[0].y=0;sEnemies[0].x=34*256;sEnemies[1].x=32*256;
     sBattle.actor2=&sEnemies[0];ActionSelectMeleeTarget(&sSora,PORT_ACTION_RIGHT);
-    CHECK(sActionTarget==&sEnemies[0],12); /* small retention bonus prevents jitter */
+    CHECK(sActionTarget==&sEnemies[0],12); /* bounded retention prevents jitter */
     sActionTarget=(BtlObj*)1;CHECK(!ActionLiveMeleeTarget(),13); /* never dereference stale pointer */
     sActionTarget=&sEnemies[0];CHECK(ActionLiveMeleeTarget()==sActionTarget,14);
     ListPoolRemove(&sEnemies[0].node,&sBattle.pool);CHECK(!ActionLiveMeleeTarget(),15);
@@ -105,7 +109,7 @@ static int run_tests(void) {
     CHECK(act->x==-24*256 && act->y==-12*256,23);
     act->x=act->y=0;sActionTarget=NULL;
     for(i=0;i<30;++i) ActionApproachMeleeTarget(&sSora);
-    CHECK(act->x==-8*256 && act->y==0,24);
+    CHECK(act->x==0 && act->y==0,24); /* a whiff never moves toward a phantom target */
     sActionTarget=&sEnemies[0];sActionCurrent.comboStep=1;sSora.state=BTL_SORA_STATE_COMBO;
     CHECK(PortActionLockMeleeTarget() && sBattle.actor2==sActionTarget,25);
     sEnemies[0].hp=0;CHECK(PortActionLockMeleeTarget() && !sBattle.actor2,26);
@@ -156,6 +160,103 @@ static int run_tests(void) {
     CHECK(!sActionTarget,48);
     sEnemies[0].z=0;sEnemies[0].x=97*256;
     ActionSelectMeleeTarget(&sSora,PORT_ACTION_RIGHT);CHECK(!sActionTarget,49);
+    /* A real continuation retains a reachable victim even when a bystander
+     * has become closer. Explicit opposite direction still switches it. */
+    sActionCurrent.finisher=0;sActionCurrent.comboStep=2;
+    act->x=act->y=act->z=0;act->flags=0;
+    sEnemies[0].hp=100;sEnemies[0].x=52*256;sEnemies[0].y=sEnemies[0].z=0;
+    sEnemies[1].hp=100;sEnemies[1].x=24*256;sEnemies[1].y=sEnemies[1].z=0;
+    sActionTarget=&sEnemies[0];sBattle.actor2=sActionTarget;
+    ActionSelectMeleeTarget(&sSora,PORT_ACTION_RIGHT);
+    CHECK(sActionTarget==&sEnemies[0],50);
+    sEnemies[1].x=-24*256;
+    ActionSelectMeleeTarget(&sSora,PORT_ACTION_LEFT);
+    CHECK(sActionTarget==&sEnemies[1],51);
+    /* Retention never bypasses the collision-compatible height envelope. */
+    sEnemies[1].z=-37*256;
+    ActionSelectMeleeTarget(&sSora,PORT_ACTION_LEFT);
+    CHECK(!sActionTarget,52);
+    /* A fresh chain may select the nearer intended victim. */
+    sActionCurrent.comboStep=1;act->flags=0;
+    sEnemies[1].x=24*256;sEnemies[1].z=0;
+    sActionTarget=&sEnemies[0];sBattle.actor2=sActionTarget;
+    ActionSelectMeleeTarget(&sSora,PORT_ACTION_RIGHT);
+    CHECK(sActionTarget==&sEnemies[1],53);
+    /* Production quick-Fire origin plus the production native collision
+     * eligibility function: the closer melee approach exposes a real dead
+     * zone; moving the origin must retain every authored box/timing rule. */
+    act->x=act->y=act->z=0;act->flags=0;
+    sActive=sActionIndependent=1;sActionCurrent.command=PORT_ACTION_FIRE;
+    sActionCurrent.finisher=0;sActionCurrent.comboStep=0;
+    sEnemies[0].hp=100;sEnemies[0].flags=0;sEnemies[0].invincibleTimer=0;
+    sEnemies[0].parent=NULL;sEnemies[0].height=32;
+    sEnemies[0].radiusX=sEnemies[0].radiusY=6;
+    sEnemies[0].x=26*256;sEnemies[0].y=sEnemies[0].z=0;
+    fireTarget=&sEnemies[0];
+    fireOffset=ActionQuickFireSpawnOffset(&sSora,&fireTarget);
+    CHECK(fireOffset==54*256 && fireTarget==&sEnemies[0],54);
+    CHECK(!CanAttackBoxHitBtlObj(fireTarget,44*256,0,-14*256,8,8,16),55);
+    CHECK(CanAttackBoxHitBtlObj(fireTarget,fireOffset-28*256,0,-14*256,8,8,16),56);
+    /* Preserve the old 36-pixel route exactly when its native box hits. */
+    sEnemies[0].x=36*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,57);
+    CHECK(CanAttackBoxHitBtlObj(fireTarget,44*256,0,-14*256,8,8,16),58);
+    act->flags=BTLOBJ_FLAG_FACING_LEFT;sEnemies[0].x=-26*256;
+    fireOffset=ActionQuickFireSpawnOffset(&sSora,&fireTarget);
+    CHECK(fireOffset==54*256,59);
+    CHECK(CanAttackBoxHitBtlObj(fireTarget,-fireOffset+28*256,0,-14*256,8,8,16),60);
+    sEnemies[0].x=-100*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,61);
+    sEnemies[0].x=26*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,62);
+    act->flags=0;sEnemies[0].x=26*256;sEnemies[0].y=15*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,63);
+    sEnemies[0].y=0;sEnemies[0].z=-31*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,64);
+    sEnemies[0].z=35*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,65);
+    sEnemies[0].z=0;sEnemies[0].hp=0;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && !fireTarget,66);
+    sEnemies[0].hp=100;fireTarget=(BtlObj*)1;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && !fireTarget,67);
+    fireTarget=&sEnemies[0];ListPoolRemove(&sEnemies[0].node,&sBattle.pool);
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && !fireTarget,68);
+    ListPoolAppend(&sEnemies[0].node,&sBattle.pool);
+    fireTarget=&sEnemies[0];sEnemies[0].flags=BTLOBJ_FLAG_UNHITTABLE;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && !fireTarget,69);
+    fireTarget=&sEnemies[0];sEnemies[0].flags=BTLOBJ_FLAG_INVULNERABLE;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && !fireTarget,70);
+    sEnemies[0].flags=0;fireTarget=&sEnemies[0];sActive=0;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && fireTarget==&sEnemies[0],71);
+    sActive=1;sActionIndependent=0;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,72);
+    sActionIndependent=1;
+    CHECK(ActionQuickFireSpawnOffset(NULL,&fireTarget)==72*256,73);
+    sActionCurrent.command=PORT_ACTION_BLIZZARD;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,74);
+    sActionCurrent.command=PORT_ACTION_FIRE;sActionCurrent.finisher=1;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,75);
+    sActionCurrent.finisher=0;sActionCurrent.command=PORT_ACTION_NATIVE_TECHNIQUE;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,76);
+    sActionCurrent.command=PORT_ACTION_FIRE;sEnemies[0].x=0;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==28*256,77);
+    sEnemies[0].x=44*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,78);
+    sEnemies[0].x=26*256;sEnemies[0].y=14*256;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==54*256,79);
+    sEnemies[0].y=0;sEnemies[0].invincibleTimer=1;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,80);
+    sEnemies[0].invincibleTimer=0;gBtlWork=NULL;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256,81);
+    gBtlWork=&sBattle;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,NULL)==72*256,82);
+    /* A closer bystander cannot replace the selected live spell victim. */
+    sEnemies[1].x=0;sEnemies[1].y=sEnemies[1].z=0;sEnemies[1].hp=100;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==54*256 && fireTarget==&sEnemies[0],83);
+    fireTarget=(BtlObj*)1;sActive=0;
+    CHECK(ActionQuickFireSpawnOffset(&sSora,&fireTarget)==72*256 && fireTarget==(BtlObj*)1,84);
+    sActive=1;fireTarget=&sEnemies[0];
+    CHECK(ActionQuickFireSpawnOffset(&sOtherSora,&fireTarget)==72*256 && fireTarget==&sEnemies[0],85);
     return 0;
 }
 void _start(void) { int code=run_tests();__asm__ volatile("int $0x80"::"a"(1),"b"(code));__builtin_unreachable(); }
@@ -164,8 +265,11 @@ void _start(void) { int code=run_tests();__asm__ volatile("int $0x80"::"a"(1),"b
 def main():
     source=(ROOT/'src/btl/btl_sora.c').read_text()
     start=source.rfind('enum',0,source.index('BTL_SORA_STATE_ENTER,'));states=source[start:source.index('};',start)+2]
-    names=['ActionTargetUsable','ActionLiveMeleeTarget','ActionSelectMeleeTarget','PortActionLockMeleeTarget','ActionApproachMeleeTarget','PortActionPlayerMeleeHit']
-    functions='\n'.join(extract(source,n) for n in names)
+    names=['ActionFullNative','ActionQuickMagic','ActionTargetUsable','ActionQuickFireSpawnOffset',
+        'ActionLiveMeleeTarget','ActionSelectMeleeTarget','PortActionLockMeleeTarget',
+        'ActionApproachMeleeTarget','PortActionPlayerMeleeHit']
+    functions=extract((ROOT/'src/btl/btl_collision.c').read_text(),'CanAttackBoxHitBtlObj')+'\n'
+    functions+='\n'.join(extract(source,n) for n in names)
     includes=[ROOT/'include',ROOT/'port/include']+sorted(p for p in (ROOT/'include').iterdir() if p.is_dir() and p.name!='gba')
     with tempfile.TemporaryDirectory(prefix='rekhcom-target-') as folder:
         folder=Path(folder);runner=folder/'target.c';exe=folder/'target'
@@ -179,5 +283,5 @@ def main():
             if e.errno!=errno.ENOEXEC: raise
             status=run_elf32(exe)
         if status: raise SystemExit('FAIL target/flow check '+str(status))
-    print('PASS: 49 production target, launched finisher retention, bounded chase, no vertical lift and melee MP adapter checks')
+    print('PASS: 85 production target, chain retention, bounded chase, melee MP and collision-eligible quick-Fire origin checks')
 if __name__=='__main__':main()

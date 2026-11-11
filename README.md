@@ -11,8 +11,8 @@ Three normal attacks branch into complete native finishers through direction, ho
 - **Native inventory:** see [catalog scope and coverage](mod/action-edition/development/NATIVE_CATALOG.md).
 - **Build:** see [launcher/README.md](launcher/README.md).
 - **Validation:** see [launcher/VALIDATION.md](launcher/VALIDATION.md).
-- **Combat research:** see [the source audit and improvement plan](mod/action-edition/development/COMBAT_RESEARCH.md), covering 20 developer/official references and the proposed work before the next gameplay edit.
+- **Combat research:** see [the source audit and improvement plan](mod/action-edition/development/COMBAT_RESEARCH.md), covering 20 developer/official references and the principles behind the 0.11.0 candidate.
 
-Version 0.10.1 refreshes this mod's logo and app identity while retaining 0.10's native animations, multi-hit sequences and screen effects. The [restored release](https://github.com/ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix/releases/tag/v0.10.1) includes the unchanged game files, branding masters and native catalog. Full campaign balance and physical-controller verification remain incomplete. Story/Practice profiles stay outside immutable version folders. The research plan has not yet changed gameplay.
+Version 0.10.1 refreshes this mod's logo and app identity while retaining 0.10's native animations, multi-hit sequences and screen effects. The [restored release](https://github.com/ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix/releases/tag/v0.10.1) includes the unchanged game files, branding masters and native catalog. Full campaign balance and physical-controller verification remain incomplete. Story/Practice profiles stay outside immutable version folders. The 0.11.0 development candidate adds native recovery links, opening variations, bounded defense/input buffering, target retention and contact feedback. It is not yet a published release; current validation is tracked separately.
 
 Independent fan modification. No ROM, saves or player data are included. Original source and third-party notices retain their terms.

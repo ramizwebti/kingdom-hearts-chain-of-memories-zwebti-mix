@@ -56,7 +56,8 @@ void PortActionSelectFinisher(PortActionState* state,uint32_t nativeMove) {
 
 void PortActionQueueNative(PortActionState* state,uint32_t nativeMove) {
     state->bufferedNativeMove=nativeMove;state->bufferedKind=BUFFER_NATIVE;
-    state->bufferFrames=36;state->magicQueued=0;++state->revision;
+    state->bufferFrames=36;state->bufferAgeFrames=PORT_ACTION_BUFFER_MAX_FRAMES;
+    state->magicQueued=0;++state->revision;
 }
 
 void PortActionAddAssistGauge(PortActionState* state,unsigned amount) {
@@ -96,9 +97,11 @@ int PortActionPendingNative(const PortActionState* state,uint32_t* nativeMove) {
 void PortActionInterrupt(PortActionState* state) {
     state->revision++;
     state->bufferFrames = 0;
+    state->bufferAgeFrames = 0;
     state->bufferedKind = BUFFER_NONE;
     state->comboStep = 0;
     state->comboFrames = 0;
+    state->defenseComboFrames = 0;
     state->canAct = 0;
     state->lastCommand = PORT_ACTION_NONE;
     state->feedbackFrames = 0;
@@ -111,6 +114,19 @@ void PortActionInterrupt(PortActionState* state) {
     state->confirmedChain=0;
     state->magicQueued=0;
     state->attackCharging=state->magicCharging=state->assistCharging=0;
+}
+
+void PortActionDefend(PortActionState* state) {
+    unsigned step=state->comboFrames ? state->comboStep : 0;
+    unsigned airborne=state->comboAirborne;
+    unsigned remaining=state->defenseComboFrames;
+    PortActionInterrupt(state);
+    if(step) {
+        state->comboStep=(uint8_t)step;
+        state->comboAirborne=(uint8_t)airborne;
+        state->comboFrames=PORT_ACTION_COMBO_FRAMES;
+        state->defenseComboFrames=(uint16_t)(remaining ? remaining : PORT_ACTION_DEFENSE_COMBO_FRAMES);
+    }
 }
 
 /* The game adapter calls this only when a new roll has actually started. */
@@ -168,20 +184,39 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
     if (state->mpGainFrames) --state->mpGainFrames;
     state->magicPaletteFrames=0;
     if (state->finisherFrames && !--state->finisherFrames) state->confirmedChain=0;
-    /* A combo may outlive an entire slow authored animation. Its grace
-     * period starts when the actor can actually accept the next input. */
-    if (state->comboFrames && input->canAct && !state->attackCharging && --state->comboFrames == 0) {
+    /* A defensive escape may preserve sequence position, never an unlimited
+     * ready finisher. This clock also runs during guard, rolls and other
+     * ineligible states. Repeated defense cannot extend the original budget. */
+    if(state->defenseComboFrames && !--state->defenseComboFrames) {
+        state->comboStep=state->comboFrames=0;
+        state->confirmedChain=state->finisherFrames=0;
+        state->attackCharging=0;
+        state->bufferFrames=state->bufferAgeFrames=0;
+        state->bufferedKind=BUFFER_NONE;
+    }
+    /* Recovery links do not spend the neutral grace period early. A spell
+     * begun within that period retains the chain through its bounded charge;
+     * successful spell acceptance refreshes it below, without spending MP
+     * early or keeping a stale released request alive. */
+    if (state->comboFrames && input->canAct && !input->comboGracePaused &&
+        !state->attackCharging && !state->magicCharging &&
+        !(input->pressed&PORT_ACTION_MAGIC) && --state->comboFrames == 0) {
         state->comboStep=0;
         if(!state->finisherFrames) state->confirmedChain=0;
     }
-    /* A visible single spell request waits for the effect channel; Attack,
-     * spell selection, damage or a mode change cancels it. Do not silently
-     * expire it while the game is still displaying the previous spell. */
+    /* Retain a useful early press across one normal animation, but never let
+     * canAct/effect contention suspend its lifetime for a long native move.
+     * Hitstop capture is owned by the adapter; it does not tick this state. */
+    if(state->bufferAgeFrames && !--state->bufferAgeFrames) {
+        state->bufferFrames=0;
+        state->bufferedKind=BUFFER_NONE;
+    }
     if (state->bufferFrames && input->canAct &&
         !((state->bufferedKind==BUFFER_MAGIC || state->bufferedKind==BUFFER_NATIVE ||
             (state->bufferedKind==BUFFER_ATTACK && state->comboStep==3)) && input->spellBusy) &&
         --state->bufferFrames == 0)
         state->bufferedKind = BUFFER_NONE;
+    if(!state->bufferFrames) state->bufferAgeFrames=0;
     state->magicQueued=state->bufferFrames && state->bufferedKind==BUFFER_MAGIC;
 
     if (state->regenDelay) {
@@ -210,7 +245,7 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
         state->magicIndex = (state->magicIndex + 1) % PORT_ACTION_MAGIC_COUNT;
     if(input->pressed&(PORT_ACTION_PREV_MAGIC|PORT_ACTION_NEXT_MAGIC|PORT_ACTION_SPECIAL)) {
         if(state->bufferedKind==BUFFER_MAGIC) {
-            state->bufferedKind=BUFFER_NONE;state->bufferFrames=0;state->magicQueued=0;
+            state->bufferedKind=BUFFER_NONE;state->bufferFrames=state->bufferAgeFrames=0;state->magicQueued=0;
         }
     }
     if(input->pressed&PORT_ACTION_PREV_ASSIST)
@@ -253,6 +288,7 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
         if(!(input->held&PORT_ACTION_MAGIC) || state->magicChargeTicks>=PORT_ACTION_CHARGE_FULL) {
             unsigned cost;
             state->bufferedKind=BUFFER_MAGIC;state->bufferFrames=36;
+            state->bufferAgeFrames=PORT_ACTION_BUFFER_MAX_FRAMES;
             state->bufferedMagic=state->magicIndex;state->bufferedCharge=state->magicChargeTicks;
             state->bufferedModifier=state->magicChargeModifier;state->bufferedFacing=state->magicChargeFacing;
             state->bufferedHeld=state->magicChargeDirections;
@@ -262,7 +298,9 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
             state->denial=state->recharging ? PORT_ACTION_DENIAL_RECHARGE : state->mp<cost ?
                 PORT_ACTION_DENIAL_MP : state->spellBusy ? PORT_ACTION_DENIAL_EFFECT : PORT_ACTION_DENIAL_NONE;
             state->denialFrames=state->denial ? 45 : 0;
-            if(state->recharging || state->mp<cost) { state->bufferedKind=BUFFER_NONE;state->bufferFrames=0; }
+            if(state->recharging || state->mp<cost) {
+                state->bufferedKind=BUFFER_NONE;state->bufferFrames=state->bufferAgeFrames=0;
+            }
             state->magicCharging=0;
         }
     }
@@ -273,7 +311,9 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
             state->attackChargeFacing=input->facingLeft;state->attackChargeDirections=input->held;
         } else {
             state->bufferedKind=BUFFER_ATTACK;state->bufferFrames=PORT_ACTION_BUFFER_FRAMES;
+            state->bufferAgeFrames=PORT_ACTION_BUFFER_MAX_FRAMES;
             state->bufferedHeld=input->held;state->bufferedMagic=state->magicIndex;
+            state->bufferedFacing=input->facingLeft;
         }
     }
     if(state->attackCharging) {
@@ -282,6 +322,9 @@ void PortActionTick(PortActionState* state, const PortActionInput* input) {
             PortActionQueueNative(state,PortActionRouteFinisher(state->magicIndex,input->airborne,
                 state->attackChargeDirections,state->attackChargeFacing,state->attackChargeTicks,
                 state->attackChargeModifier));state->bufferedHeld=state->attackChargeDirections;
+            state->bufferedFacing=state->attackChargeFacing;
+            state->bufferedCharge=state->attackChargeTicks;
+            state->bufferedModifier=state->attackChargeModifier;
             state->attackCharging=0;
         }
     }
@@ -339,6 +382,7 @@ int PortActionCommit(PortActionState* state, const PortActionIntent* intent) {
         return 0;
 
     state->revision++;
+    state->defenseComboFrames=0;
     state->mp -= intent->mpCost;
     state->cooldown[intent->command] = sCommands[intent->command].cooldownFrames;
     if (intent->mpCost) {
@@ -373,6 +417,7 @@ int PortActionCommit(PortActionState* state, const PortActionIntent* intent) {
     state->feedbackFrames = 90;
     state->bufferedKind = BUFFER_NONE;
     state->bufferFrames = 0;
+    state->bufferAgeFrames = 0;
     state->magicQueued=0;
     return 1;
 }

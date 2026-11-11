@@ -6,9 +6,11 @@ Keep Norton enabled. Development uses one clearly named folder inside this check
 
 Native Windows executables use `native/out`; launcher staging and default output use `launcher` and `launcher/out`. Compiler/test temporary files use `temp` only in the development process and its children. This folder is not a virtual machine or security sandbox. The incremental guest builder retains its existing non-Windows-executable object/image paths outside this folder.
 
-The user must add any Norton exception manually. Norton documents the current Windows path as **Security → Advanced Security → Computer → Antivirus → Exclusions → Add**, then select the exact folder and save. An exception reduces protection for its contents. Keep the exception limited to these local development artifacts; saves, installed versions, Downloads and other projects remain protected normally. Menu names vary by Norton version. See [Norton's instructions](https://support.norton.com/sp/en/us/norton-download-install/current/solutions/kb20100222230832EN).
+Use the GitHub-hosted Windows checks for routine ROM-free combat tests. The `verify-launcher.yml` workflow uses installed Visual C++ to check controller routes, 100,000 invariant steps, interrupted-attacker reservations, feedback and bounded FX; its x86 adapters reuse production targeting/collision code and companion phase gates with checked 32-bit layouts. Python and Node also verify the source inventory and standalone catalog client. No ROM, extracted graphics, local game data, compiler download or account token is required.
 
-## Routine commands
+Local compiler, helper and native-test launches are currently paused after Norton flagged `feedback.exe`, `pressure.exe`, `routes.exe` and `adapter-collision.exe`. Review the named detections before resuming local execution. Keep Norton enabled; do not add broad exclusions, restore quarantined files, or rename/repackage a blocked executable to make it run. Hosted CI is the default for these source-only checks.
+
+## Local commands after security review
 
 ```powershell
 python port/windows64/develop.py folder
@@ -30,4 +32,4 @@ The cache is an efficiency feature, not a security verdict. New or changed progr
 
 ## Validation of this workflow change
 
-Fourteen generic cache tests, ten launcher-orchestration tests and nine resource-stamping tests pass using Python and non-executable `.bin` fixtures. These cover unchanged-file reuse, full-hash invalidation, missing/corrupt outputs, dependency/member changes, deterministic ZIPs, failed/mid-change builds and icon/resource preservation. Python syntax and command help were checked. No new Windows executable was compiled, copied or run to validate this setup; the first real native build remains pending the user's Norton setup/review.
+The original cache-workflow validation comprised fourteen generic cache tests, ten launcher-orchestration tests and nine resource-stamping tests using Python and non-executable `.bin` fixtures. These cover unchanged-file reuse, full-hash invalidation, missing/corrupt outputs, dependency/member changes, deterministic ZIPs, failed/mid-change builds and icon/resource preservation. Python syntax and command help were checked. Those counts describe that cache change; the expanded hosted combat workflow reports its own results separately.

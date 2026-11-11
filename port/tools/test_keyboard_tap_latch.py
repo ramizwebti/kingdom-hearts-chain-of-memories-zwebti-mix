@@ -9,7 +9,7 @@ import os
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / 'build/keyboard-tap-latch'
+OUT = ROOT / 'build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development/native/out/keyboard-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 source = (ROOT / 'port/src/port_input.c').read_text(encoding='utf-8')
 
@@ -60,7 +60,8 @@ code += definitions + state
 for marker in ('void PortInputSuppressUntilRelease(', 'void PortInputResetBindings(',
                'void PortInputHandleEvent(', 'uint32_t PortInputKeys(',
                'static uint32_t ZoomChord(', 'static void DeckButton(',
-               'uint16_t PortInputResolve(', 'int PortActionGuardHeld('):
+               'uint16_t PortInputResolve(', 'int PortActionGuardHeld(',
+               'int PortPeekDodge(', 'void PortClearDodge(', 'int PortTakeDodge('):
     code += function(marker)
 code += r'''
 static void event(SDL_Keycode key, int down, int repeat) {
@@ -74,6 +75,7 @@ int main(void) {
     gPortConfig.keys[PORT_ACT_A][0]=SDLK_X;
     gPortConfig.keys[PORT_ACT_GUARD][0]=SDLK_V;
     gPortConfig.keys[PORT_ACT_UNSTOCK][0]=SDLK_V;
+    gPortConfig.keys[PORT_ACT_DODGE][0]=SDLK_C;
     gPortConfig.dodgeButton=gPortConfig.stockButton=1;
     reset();
     for(int i=0;i<3;i++) {
@@ -111,9 +113,26 @@ int main(void) {
     event(SDLK_V,1,0);
     for(int i=0;i<30;i++)assert(!PortInputResolve(PortInputKeys()) && PortActionGuardHeld());
     event(SDLK_V,0,0);PortInputResolve(PortInputKeys());assert(!PortActionGuardHeld());
+    /* In action combat a denied roll may be inspected until its bounded
+     * acceptance window; peeking never consumes it or refreshes its age. */
+    reset();event(SDLK_C,1,0);PortInputResolve(PortInputKeys());
+    assert(PortPeekDodge(KEY_LEFT,0)==KEY_LEFT);
+    assert(PortPeekDodge(KEY_LEFT,0)==KEY_LEFT);
+    event(SDLK_C,0,0);
+    for(int i=0;i<ACTION_DODGE_PENDING_FRAMES-1;i++) {
+        PortInputResolve(PortInputKeys());assert(PortPeekDodge(KEY_RIGHT,0)==KEY_RIGHT);
+    }
+    PortInputResolve(PortInputKeys());assert(!PortPeekDodge(0,0));
+    event(SDLK_C,1,0);PortInputResolve(PortInputKeys());
+    PortClearDodge();assert(!PortPeekDodge(0,0));
+    for(int i=0;i<30;i++) {PortInputResolve(PortInputKeys());assert(!PortPeekDodge(0,0));}
+    event(SDLK_C,0,0);PortInputResolve(PortInputKeys());
+    event(SDLK_C,1,0);PortInputResolve(PortInputKeys());
+    SDL_Event lostDodge={0};lostDodge.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    PortInputHandleEvent(&lostDodge);assert(!PortPeekDodge(0,0));
     actionActive=0;reset();event(SDLK_V,1,0);event(SDLK_V,0,0);
     assert(!PortInputResolve(PortInputKeys()) && !PortActionGuardHeld());
-    puts("Production keyboard: three between-frame taps delivered once each; UI reads retain pulses; held/repeat has no extra edges; focus/reset/overlay wipe; remap; quick/held Guard PASS");
+    puts("Production keyboard: between-frame taps, repeat/focus/reset/overlay/remap, Guard and bounded peek/consume Dodge PASS");
     return 0;
 }
 '''

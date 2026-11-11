@@ -18,7 +18,9 @@ static inline int PortActionTargetScoreWithin(int dx, int dy, int dz,
         if (ax>32*256) return -1;
         score+=24*256;
     }
-    if (retained) score-=4*256;
+    /* A live chain target wins over a nearby bystander until deliberate
+     * directional intent rejects it. Range/height filters still apply. */
+    if (retained) score-=16*256;
     return score<0?0:score;
 }
 

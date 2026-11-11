@@ -99,6 +99,10 @@ void PortUiOpenNewGame(void);
 int PortFastText(void);
 /* One-button dodge roll: the d-pad direction to roll toward, or 0. */
 int PortTakeDodge(int held, int facingLeft);
+/* Action combat inspects the short pending request without consuming it;
+ * clear only after an accepted roll, damage interruption or mode change. */
+int PortPeekDodge(int held, int facingLeft);
+void PortClearDodge(void);
 /* Return-stocked-cards button: 1 once per completed hold. */
 int PortTakeUnstock(void);
 /* Deck editor: the dodge button places the held card and pushes the rest, the stock button closes the deck's gaps.

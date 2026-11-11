@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$testOutput = Join-Path $repositoryRoot 'build/launcher-tests'
+$testOutput = Join-Path $repositoryRoot 'build/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Development/native/out/release-store-tests'
 [void][System.IO.Directory]::CreateDirectory($testOutput)
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 $binary = Join-Path $testOutput 'ReleaseStoreTests.exe'
