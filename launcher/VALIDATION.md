@@ -20,4 +20,12 @@ The metadata catalog was refreshed against the current presentation sources: **3
 
 The broader 0.10 reference passed102 combat scenarios,124 catalog execution cases,11 assist probes, four visual scenarios and three HUD modes on guest `3ffa8e5a04013b35da0a4f39c5137821b0b522c6f5bd412ed14f0dcd9dd756ff`. Those broad suites were **not rerun on the changed 0.10.1 guest**. Their exact prior evidence and limits are preserved in [VALIDATION-0.10.0.md](VALIDATION-0.10.0.md); the current release uses the focused checks above.
 
-Physical controller feel, full campaign progression and encounter balance remain unverified. No other Kingdom Hearts project was inspected or changed. GitHub publishing/live updates remain pending because Composure exposes no tools in this session.
+Physical controller feel, full campaign progression and encounter balance remain unverified. Other Kingdom Hearts projects remain outside this mod's scope.
+
+## GitHub restoration and research — November 10, 2026
+
+The full source and branding are restored at `ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix` (repository ID1453493588). Restored main commit `bb915b2affaefa4f8eabb0dc83d130979259c823` has tree `198354235e97184b8e9ae8dc3603149ddb33b202`, identical to local checkpoint `5b7351e1d9e24ea9fd9c5ecd5e6690c5d35b4276`.
+
+Published release `v0.10.1` uses source commit `1c45f8dfc8309a8adaf1191e3322405edf5460d0`, tree `c8341886869e0c22bb35d464a750dad9e6c91662`, identical to the original local release source `5d5086d6fcf02ec6a51cf3463b67ddb9b1bdee61`. All five uploaded assets (EXE, runtime ZIP, ZIP checksum, branding ZIP and native-catalog ZIP) have GitHub SHA256 digests matching their verified saved files. GitHub normalizes spaces in the EXE asset name to periods; its bytes are unchanged.
+
+No new EXEs were built or executed, gameplay files changed, installed settings altered, or native combat suites rerun during restoration/research. Existing test evidence above keeps its original scope. Live publishing is verified; the launcher's complete live download/install path remains untested. The current source audit and proposed acceptance criteria are in [COMBAT_RESEARCH.md](../mod/action-edition/development/COMBAT_RESEARCH.md).

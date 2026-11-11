@@ -1,12 +1,18 @@
 # Kingdom Hearts Chain of Memories: Zwebti Mix — 0.10.1 checkpoint
 
-Only work in this recovered mod checkout. Never inspect/change another Kingdom Hearts project. GitHub work must use Composure; its tools remain unavailable. Read root AGENTS.md first. Combat artwork remains native. Version0.10.1 uses the supplied pink subtitle/heart references for project branding; see branding/BRAND_NOTES.md and ASSET_PROVENANCE.json.
+Only work in this recovered mod checkout. Never inspect/change another Kingdom Hearts project. GitHub work must use Composure; it is connected and the repository is restored. Read root AGENTS.md first. Combat artwork remains native. Version0.10.1 uses the supplied pink subtitle/heart references for project branding; see branding/BRAND_NOTES.md and ASSET_PROVENANCE.json.
+
+## Resumed project — November 10, 2026
+
+The user cancelled the deletion request and authorized restoration. Work only on Kingdom Hearts Chain of Memories: Zwebti Mix. The recreated GitHub repository is `ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix`, ID1453493588. Main was restored to `bb915b2affaefa4f8eabb0dc83d130979259c823`, whose complete tree equals local checkpoint5b7351e. Releasev0.10.1 is published with five byte-verified artifacts. Its separate source commit1c45f8d has treec834188, equal to original local release source5d5086d.
+
+The user explicitly requested substantial research before gameplay editing. Read [COMBAT_RESEARCH.md](COMBAT_RESEARCH.md): 20 primary developer/official sources, actual source findings, the existing Blitz timing trace, and the proposed measured prototype. No combat code or playable package was changed during this phase. The next priority is authored transition/input/target/reaction rules, then defense/assist/crowd integration, using existing native assets. Do not silently implement the entire proposal without first reading the user's next direction.
 
 ## Current branding release
 
 Version0.10.1 installed and packaged: guest `c0a02c81be4ff86301a8248574e3377a38dc8f37e5a7d5c03fddcaae2db08774`, stamped host `c76f054f9df4f926519d313bb4ab64f7fc1595fbc23e513df05535e758f25106`, unchanged shipping SDL. Runtime `build/runtime-v0101-shipping`; focused7 title/Practice/Options/Blitz/fallback checks pass. New full wordmark combines authentic game-title reference, gold Chain of Memories label and supplied pink Zwebti Mix subtitle/blossoms; pink heart is icon-only. Source references/provenance are in `mod/action-edition/branding`. Launcher, dialogs, native window metadata, Practice header and release filenames clearly identify this game.
 
-0.10→0.10.1 upgrade/idempotence passed; all16 existing profile files stayed byte-identical and0.10.0 remains installed. See `launcher/VALIDATION.md` for current evidence and `launcher/VALIDATION-0.10.0.md` for the earlier broad combat suite. Do not transfer old broad passes to the changed presentation guest. Current full-name release/source artifacts are under the chat outputs folder; no GitHub publication occurred.
+0.10→0.10.1 upgrade/idempotence passed; all16 existing profile files stayed byte-identical and0.10.0 remains installed. See `launcher/VALIDATION.md` for current evidence and `launcher/VALIDATION-0.10.0.md` for the earlier broad combat suite. Do not transfer old broad passes to the changed presentation guest. Current full-name release/source artifacts are under the chat outputs folder and the restored GitHub release.
 
 ## Shipping behavior
 
@@ -26,4 +32,4 @@ Version0.10.0 shipping guest SHA256:3ffa8e5a04013b35da0a4f39c5137821b0b522c6f5bd
 
 Native catalog source/generator/tests are in port/tools/build_native_catalog.py, test_native_catalog.py and test_native_catalog_ui.cjs; detailed scope is NATIVE_CATALOG.md. Generated JSON/standaloneHTML are metadata-only: full authored asset/source inventory, all330 AttackDefs,165 MoveIds, state/geometry/effect references; no ROM/image bytes. Not every enemy actor task is a directly playable Sora move. Runtime execution and metadata coverage are separate claims.
 
-Full campaign progression/balance and physical-device feel remain unverified. Classic/Riku/link combat keeps its native rules. Never transfer a pass to a changed guest; inspect actual collision/status/cleanup and frame captures. Preserve profiles and immutable prior versions. Composure publishing/live updates remain unconfigured; no other Kingdom Hearts project changed.
+Full campaign progression/balance and physical-device feel remain unverified. Classic/Riku/link combat keeps its native rules. Never transfer a pass to a changed guest; inspect actual collision/status/cleanup and frame captures. Preserve profiles and immutable prior versions. Composure publishing is verified; installed update settings were not changed and the launcher's full live-update path remains untested. Other Kingdom Hearts projects remain outside scope.
