@@ -159,42 +159,7 @@ def stamp_icon(source, destination, icon):
     before_sections = pe_sections(source)
     before_resources = resources(source)
     frames = icon_frames(icon)
-    group = struct.pack('<HHH', 0, 1, len(frames))
-    canonical_icons = {}
-    for number, (entry, payload) in enumerate(frames, start=1):
-        canonical_icons[(3, number, 0)] = payload
-        group += entry + struct.pack('<H', number)
-    canonical_icons[(14, 1, 0)] = group
     destination.parent.mkdir(parents=True, exist_ok=True)
-    source_icons = {key: payload for key, payload in before_resources.items()
-                    if key[0] in (3, 14)}
-    if source_icons == canonical_icons:
-        # The required neutral group and every frame are already present.
-        # Compare complete files: equal sections alone cannot validate headers.
-        reused = destination.is_file() and sha256(destination) == before_hash
-        if not reused:
-            shutil.copy2(source, destination)
-        if sha256(destination) != before_hash:
-            raise RuntimeError('Copied runtime did not match the verified source')
-        if pe_sections(destination) != before_sections:
-            raise RuntimeError('Code/data sections changed during runtime copy')
-        if resources(destination) != before_resources:
-            raise RuntimeError('Resources changed during runtime copy')
-        if sha256(source) != before_hash:
-            raise RuntimeError('Original runtime unexpectedly changed')
-        return {
-            'source_sha256': before_hash,
-            'stamped_sha256': before_hash,
-            'icon_sha256': sha256(icon),
-            'icon_frames': len(frames),
-            'unchanged_sections': sorted(before_sections),
-            'non_icon_resources_preserved': True,
-            'icon_resources_reextracted_and_verified': True,
-            'original_unchanged': True,
-            'changed': not reused,
-            'reused': reused,
-            'resource_edit_performed': False,
-        }
     fd, temporary_name = tempfile.mkstemp(prefix='icon-', suffix='.exe', dir=destination.parent)
     os.close(fd)
     temporary = Path(temporary_name)
@@ -213,11 +178,13 @@ def stamp_icon(source, destination, icon):
                     if not kernel.UpdateResourceW(handle, resource_arg(kind), resource_arg(name),
                                                   language, None, 0):
                         raise ctypes.WinError(ctypes.get_last_error())
+            group = struct.pack('<HHH', 0, 1, len(frames))
             for number, (entry, payload) in enumerate(frames, start=1):
                 buffer = ctypes.create_string_buffer(payload)
                 if not kernel.UpdateResourceW(handle, resource_arg(3), resource_arg(number),
                                               0, buffer, len(payload)):
                     raise ctypes.WinError(ctypes.get_last_error())
+                group += entry + struct.pack('<H', number)
             buffer = ctypes.create_string_buffer(group)
             if not kernel.UpdateResourceW(handle, resource_arg(14), resource_arg(1), 0, buffer, len(group)):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -250,9 +217,6 @@ def stamp_icon(source, destination, icon):
             'non_icon_resources_preserved': True,
             'icon_resources_reextracted_and_verified': True,
             'original_unchanged': True,
-            'changed': True,
-            'reused': False,
-            'resource_edit_performed': True,
         }
     finally:
         temporary.unlink(missing_ok=True)

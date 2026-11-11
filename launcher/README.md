@@ -4,8 +4,6 @@ Version **0.10.1** refreshes this mod's logo, app icon and full project labels w
 
 ## Rebuild the game
 
-For routine local work, use the stable development folder and build reuse described in [DEVELOPMENT.md](DEVELOPMENT.md). Norton stays enabled; any project-folder exception is a manual user setting. The commands below remain available for explicit release staging.
-
 Use portable LLVM-MinGW (`clang.exe`, `ld.lld.exe`, `llvm-objcopy.exe`) and Python with PyYAML. Dependencies may remain in a local folder.
 
 ```powershell

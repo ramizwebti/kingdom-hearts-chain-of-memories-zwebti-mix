@@ -1,4 +1,4 @@
-name: "Kingdom Hearts Chain of Memories: Zwebti Mix - Windows launcher checks"
+name: Verify Windows launcher
 on:
   push:
   pull_request:
@@ -12,4 +12,9 @@ jobs:
         run: ./port/tools/test_native_presentation.ps1
       - name: Check release installation and rollback
         shell: powershell
-        run: ./launcher/tests/test-release-store.ps1
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /out:build/ReleaseStoreTests.exe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:System.Web.Extensions.dll launcher/ReleaseStore.cs launcher/tests/ReleaseStoreTests.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/ReleaseStoreTests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
