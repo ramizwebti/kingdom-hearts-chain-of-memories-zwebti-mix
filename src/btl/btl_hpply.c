@@ -36,7 +36,9 @@
  * Action mode gives the portrait the same native colors under a distinct
  * source identity, so the body can flash while the face remains readable. */
 static u16 sActionSoraPortraitPalette[16] __attribute__((aligned(4)));
-static u8 sActionSoraPortraitTiles[0x280] __attribute__((aligned(4)));
+/* The VRAM allocation holds one displayed face, but source frame indices
+ * span the complete normal/hurt/low-HP sheet. Keep every source tile. */
+static u8 sActionSoraPortraitTiles[sizeof(gBtlHpSoraFaceTiles)] __attribute__((aligned(4)));
 
 static int UseActionHud(void) {
     return PortActionCombatRules() && !(gBtlWork->flags & BTL_FLAG_TUTORIAL);

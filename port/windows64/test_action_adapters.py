@@ -83,6 +83,7 @@ def main():
     target=runpy.run_path(str(ROOT/'port/tools/test_action_targeting.py'))
     collision=runpy.run_path(str(ROOT/'port/tools/test_action_collision.py'))
     assist=runpy.run_path(str(ROOT/'port/tools/test_action_assist_phases.py'))
+    portrait=runpy.run_path(str(ROOT/'port/tools/test_action_portrait.py'))
     start=source.rfind('enum',0,source.index('BTL_SORA_STATE_ENTER,'))
     states=source[start:source.index('};',start)+2]
     names=['ActionFullNative','ActionQuickMagic','ActionTargetUsable','ActionQuickFireSpawnOffset',
@@ -95,6 +96,7 @@ def main():
                   ['src/listpool.c','port/src/port_action.c','port/src/port_action_routes.c','port/src/port_action_catalog.c']),
         'collision':(collision['HARNESS'],['src/btl/btl_collision.c','src/listpool.c']),
         'assist-phases':(assist['source_harness'](),[]),
+        'portrait':(portrait['source_harness'](),[]),
     }
     includes=[ROOT/'include',ROOT/'port/include']+sorted(p for p in (ROOT/'include').iterdir()
                    if p.is_dir() and p.name!='gba')
@@ -109,7 +111,7 @@ def main():
         if name=='collision': harness+=windows_collision_context()
         # The Linux fixtures' only platform code is their exit syscall. Keep
         # all production functions/assertions and use the normal Windows CRT.
-        if name!='assist-phases':
+        if name in ('target','collision'):
             harness,count=re.subn(r'void _start\(void\)\s*\{[^{}]*\}',
                 'int main(void) { return run_tests(); }',harness)
             if count!=1: raise RuntimeError('Unexpected fixture entry point: '+name)

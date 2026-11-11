@@ -10,6 +10,9 @@ jobs:
       - name: Check controller combat logic without a ROM
         shell: powershell
         run: ./port/windows64/test_action_logic_ci.ps1
+      - name: Check runtime icon preservation without executing a game
+        shell: powershell
+        run: python -m unittest discover -s launcher/tests -p test_stamp_runtime_icon.py
       - name: Check native source inventory and catalog client
         shell: powershell
         run: |

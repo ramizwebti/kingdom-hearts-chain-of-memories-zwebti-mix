@@ -168,8 +168,26 @@ def stamp_icon(source, destination, icon):
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_icons = {key: payload for key, payload in before_resources.items()
                     if key[0] in (3, 14)}
-    if source_icons == canonical_icons:
-        # The required neutral group and every frame are already present.
+    # Windres standardizes an unspecified zero plane count to one in the
+    # group directory. The embedded image bytes and every other entry field
+    # must still match the master ICO exactly.
+    windres_icons = dict(canonical_icons)
+    windres_group = struct.pack('<HHH', 0, 1, len(frames))
+    for number, (entry, payload) in enumerate(frames, start=1):
+        if struct.unpack_from('<H', entry, 4)[0] == 0:
+            entry = entry[:4] + struct.pack('<H', 1) + entry[6:]
+        windres_group += entry + struct.pack('<H', number)
+    windres_icons[(14, 1, 0)] = windres_group
+    normalized_icons = {(kind, name, 0): payload
+                        for (kind, name, language), payload in source_icons.items()}
+    exact_single_language = (len(source_icons) == len(canonical_icons) and
+                             len({key[2] for key in source_icons}) == 1 and
+                             (normalized_icons == canonical_icons or
+                              normalized_icons == windres_icons))
+    if exact_single_language:
+        # Windres uses the project's declared resource language. Retain an
+        # exact, complete single-language icon instead of rewriting a tested
+        # runtime merely to change its resource-language identifier.
         # Compare complete files: equal sections alone cannot validate headers.
         reused = destination.is_file() and sha256(destination) == before_hash
         if not reused:

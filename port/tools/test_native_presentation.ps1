@@ -17,6 +17,18 @@ $definition = $ast.Find({ param($node)
 if ($null -eq $definition) { throw 'Set-NativePresentation was not found.' }
 # Load only this function: the launcher UI and player directories never run.
 . ([scriptblock]::Create($definition.Extent.Text))
+# Its marker uses the launcher's project caption. Read that literal constant
+# from the same AST without executing the UI/setup portion of the launcher.
+$caption = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $node.Left.VariablePath.UserPath -eq 'projectTitle'
+}, $false)
+if ($null -eq $caption) { throw 'The launcher project caption was not found.' }
+$projectTitle = [string] $caption.Right.SafeGetValue()
+if ($projectTitle -ne 'Kingdom Hearts Chain of Memories: Zwebti Mix') {
+    throw 'The presentation fixture must remain scoped to Chain of Memories.'
+}
 
 $runRoot = Join-Path ([System.IO.Path]::GetFullPath($TestRoot)) ([Guid]::NewGuid().ToString('N'))
 [void][System.IO.Directory]::CreateDirectory($runRoot)

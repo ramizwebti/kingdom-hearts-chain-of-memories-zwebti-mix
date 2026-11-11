@@ -184,9 +184,46 @@ class StampIconTests(unittest.TestCase):
         initial[(14, 2, 0)] = initial[(14, 1, 0)]
         self.run_edit(initial)
 
-    def test_nonneutral_icon_language_is_not_a_canonical_noop(self):
+    def test_exact_single_language_icon_keeps_the_tested_binary(self):
+        self.canonical = {(kind, name, 1033 if kind in (3, 14) else language): payload
+                          for (kind, name, language), payload in self.canonical.items()}
+        report, copies = self.run_no_edit()
+        self.assertEqual(copies, 1)
+        self.assertFalse(report['resource_edit_performed'])
+        self.assertEqual(self.source.read_bytes(), self.destination.read_bytes())
+
+    def test_mixed_icon_languages_require_complete_resource_replacement(self):
+        initial = dict(self.canonical)
+        initial[(3, 1, 1033)] = initial.pop((3, 1, 0))
+        self.run_edit(initial)
+
+    def test_duplicate_language_variants_cannot_hide_a_different_frame(self):
+        initial = dict(self.canonical)
+        initial[(3, 1, 1033)] = b'different localized icon'
+        self.run_edit(initial)
+
+    def test_single_language_still_requires_every_exact_frame(self):
         initial = {(kind, name, 1033 if kind in (3, 14) else language): payload
                    for (kind, name, language), payload in self.canonical.items()}
+        initial[(3, 1, 1033)] = b'old icon frame'
+        self.run_edit(initial)
+
+    def test_windres_unspecified_plane_normalization_preserves_exact_images(self):
+        icon = bytearray(self.icon.read_bytes())
+        struct.pack_into('<H', icon, 10, 0)
+        struct.pack_into('<H', icon, 26, 0)
+        self.icon.write_bytes(icon)
+        self.canonical = {(kind, name, 1033 if kind in (3, 14) else language): payload
+                          for (kind, name, language), payload in self.canonical.items()}
+        report, copies = self.run_no_edit()
+        self.assertEqual(copies, 1)
+        self.assertFalse(report['resource_edit_performed'])
+
+    def test_wrong_group_bit_depth_still_requires_replacement(self):
+        initial = dict(self.canonical)
+        group = bytearray(initial[(14, 1, 0)])
+        struct.pack_into('<H', group, 12, 16)
+        initial[(14, 1, 0)] = bytes(group)
         self.run_edit(initial)
 
     def test_changed_icon_still_rejects_nonicon_metadata_changes(self):
