@@ -11,13 +11,13 @@ using System.Web.Script.Serialization;
 
 [assembly: AssemblyTitle("Kingdom Hearts Chain of Memories: Zwebti Mix")]
 [assembly: AssemblyProduct("Kingdom Hearts Chain of Memories: Zwebti Mix")]
-[assembly: AssemblyVersion("0.11.0.0")]
-[assembly: AssemblyFileVersion("0.11.0.0")]
+[assembly: AssemblyVersion("0.11.1.0")]
+[assembly: AssemblyFileVersion("0.11.1.0")]
 
 namespace ZwebtiMix {
     internal static class Program {
         internal const string ProjectTitle = "Kingdom Hearts Chain of Memories: Zwebti Mix";
-        internal const string SeedVersion = "0.11.0";
+        internal const string SeedVersion = "0.11.1";
         internal const string UpdateRepository = "ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix";
         [STAThread]
         private static int Main(string[] args) {

@@ -2,7 +2,7 @@
 
 ![Kingdom Hearts Chain of Memories: Zwebti Mix](branding/kingdom-hearts-chain-of-memories-zwebti-mix-logo.png)
 
-Windows action playtest **0.11.0**, based on ReKHCoM. Requires your own supported unmodified USA cartridge dump. Open **Kingdom Hearts Chain of Memories - Zwebti Mix 0.11.0.exe** and choose Story or Practice Arena. This update connects the native combat tree through shorter recovery links, deliberate opening variations and bounded defensive continuation.
+Windows action playtest **0.11.1**, based on ReKHCoM. Requires your own supported unmodified USA cartridge dump. Open **Kingdom Hearts Chain of Memories - Zwebti Mix 0.11.1.exe** and choose Story or Practice Arena. This update connects the native combat tree through shorter recovery links, deliberate opening variations and bounded defensive continuation.
 
 ## Controller combat tree
 

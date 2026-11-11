@@ -1,19 +1,11 @@
-# Kingdom Hearts Chain of Memories: Zwebti Mix — 0.11.0 checkpoint
+# Kingdom Hearts Chain of Memories: Zwebti Mix - 0.11.1 guide polish
 
-Read root AGENTS.md. Work only on this COM mod; the user forbids touching other Kingdom Hearts projects. All GitHub operations use Composure with ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix. Original branding and immutable previous releases/profiles remain separate.
+Read root AGENTS.md. Only this COM project is authorized; never touch another Kingdom Hearts project. Use Composure for GitHub.
 
-## Implemented and checked
+Core 0.11.0 is published and installed, with all 16 profile files unchanged and previous versions retained. Its exact guest83b99a117f14fb17c6e7c72df7c9eb19e9d1fee7c49cf87830e0691df1b782e9 and host96401afa24137e87317f13326448c8d5f7a64d6f85c29c9b6b76c4f77790de19 pass 102 combat,124 dispatcher,14 flow,11 assist,3 physical-assist,4 visual and3 HUD checks. Actual hurt/low-HP portrait fixes are verified. See launcher/VALIDATION-0.11.0.md for the preserved evidence.
 
-Authored normal recovery links; deliberate wide/rising opening gestures; bounded offensive/defensive input age and post-strike continuation; valid target retention and bounded approach; safe native terminal defensive exits; physical-assist overlap without reopened hit locks; real-contact FX weights/coalescing; brief interrupted-Shadow pressure reservations; close quick-Fire origin correction; and complete normal/hurt/low-HP portrait source storage. Full native three-normal/fourth-finisher structure, multi-hit segments, darkening, effects and controller routes remain.
+The final review found garbled UTF-8 punctuation in the guide/catalog. Source now uses plain punctuation there. Version0.11.1 changes guide/catalog text and launcher/package version only; guest and host hashes remain identical. No native recompilation or new local helper/installer is required. Source and hosted packaging checks must pass before publishing0.11.1. Its runtime input is the same verified6c68199bda30321d449826433284917a0e92b65f714410c3e98857b864023177 ZIP, uploaded under the fixed0.11.1-runtime filename to a new draft.
 
-Final guest `83b99a117f14fb17c6e7c72df7c9eb19e9d1fee7c49cf87830e0691df1b782e9` at build/windows64/out/guest-us.bin; unchanged host `96401afa24137e87317f13326448c8d5f7a64d6f85c29c9b6b76c4f77790de19` in Development/native/out.102 combat,124 dispatcher,14 strict flow,11 assist,3 physical-assist,4 visual and3 HUD pipeline checks pass on those exact hashes. Actual hurt/low-HP portrait fixes are visually verified. Physical controller feel and full campaign balance remain unverified. See launcher/VALIDATION.md for scope.
+Norton stays enabled. Generated feedback/pressure/routes/collision helpers remain blocked; do not restore, rename, regenerate or broaden exclusions. Hosted GitHub Windows checks and packaging replace those local helpers. Native validation may reuse only the existing unchanged game host; stop if it is flagged. Profiles, ROMs, logs, captures and toolchains never enter GitHub.
 
-## Norton workflow
-
-Generated feedback/pressure/routes/collision helper EXEs triggered suspicious-file alerts despite a manual folder exception. Keep those files blocked; do not restore, rename, regenerate or broaden exclusions. Hosted Windows CI now runs ROM-free source checks. The user delegated the workflow choice: reuse only the existing unchanged game host for native checks and existing tools for its non-Windows guest image. Stop on a host/tool detection. Never change Norton settings automatically.
-
-## Release work remaining
-
-Staged runtime input: Development/release-input/Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-0.11.0-runtime.zip, SHA2566c68199bda30321d449826433284917a0e92b65f714410c3e98857b864023177. It is attached to draftv0.11.0, releaseID441248262, assetID734164969, and GitHub's digest matches. No ROM/profile/log/toolchain bytes are included. The exact original host icon is recognized without resource edits, preserving the tested host hash.
-
-Publish the complete reviewed source to main, run .github/workflows/package-windows.yml there with that SHA256 through Composure, inspect its five-file artifact and packaging manifest, then publish only after exact runtime and server hashes pass. Packaging generates a fresh metadata-only native catalog from its source commit. Preserve0.10.1 and player data. No new local helper or installer needs execution. Update validation/checkpoint after packaging and release publication actually finish.
+After the verified0.11.1 package is published, stage its exact ZIP into the new immutable version folder and atomically switch the active version, preserving all16 profile files and prior versions without executing a new local installer. Update this checkpoint and validation after those actions actually finish. Physical controller feel, full campaign balance/progression and the full live network updater remain unverified.

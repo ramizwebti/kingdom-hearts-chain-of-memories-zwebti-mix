@@ -1,6 +1,6 @@
-# Kingdom Hearts Chain of Memories: Zwebti Mix — Windows build
+# Kingdom Hearts Chain of Memories: Zwebti Mix  -  Windows build
 
-Version **0.11.0** improves native combo recovery, opening variations, defense buffering, target continuity, contact feedback and safe assist overlap while retaining the established project artwork and SDL ABI. Do not source files from another Kingdom Hearts project.
+Version **0.11.1** improves native combo recovery, opening variations, defense buffering, target continuity, contact feedback and safe assist overlap while retaining the established project artwork and SDL ABI. Do not source files from another Kingdom Hearts project.
 
 ## Rebuild the game
 
@@ -26,16 +26,16 @@ Stage the tested guest with the rebuilt `rekhcom64.exe`, the pinned `SDL3.dll` a
 python launcher/build.py --runtime-source "path/to/candidate-runtime" --output "path/to/output"
 ```
 
-Windows' .NET Framework C# compiler creates **Kingdom Hearts Chain of Memories - Zwebti Mix.exe**. The delivered launcher is named **Kingdom Hearts Chain of Memories - Zwebti Mix 0.11.0.exe**, preserving the earlier launcher. Icon stamping preserves the supplied host's code/data sections.
+Windows' .NET Framework C# compiler creates **Kingdom Hearts Chain of Memories - Zwebti Mix.exe**. The delivered launcher is named **Kingdom Hearts Chain of Memories - Zwebti Mix 0.11.1.exe**, preserving the earlier launcher. Icon stamping preserves the supplied host's code/data sections.
 
-The embedded release installs under `%LOCALAPPDATA%/Kingdom Hearts Chain of Memories - Zwebti Mix/versions/0.11.0`. Story and Practice stay under `profile/data` and `profile/practice-data`. Opening a newer EXE upgrades an older installation while retaining profiles and prior versions. Failed updates leave the active release unchanged.
+The embedded release installs under `%LOCALAPPDATA%/Kingdom Hearts Chain of Memories - Zwebti Mix/versions/0.11.1`. Story and Practice stay under `profile/data` and `profile/practice-data`. Opening a newer EXE upgrades an older installation while retaining profiles and prior versions. Failed updates leave the active release unchanged.
 
 The full launcher wordmark is `mod/action-edition/branding/kingdom-hearts-chain-of-memories-zwebti-mix-logo.png`: the Chain of Memories title with the pink **Zwebti Mix** subtitle. App/taskbar icons use the separate heart-only ICO. The build embeds these as `logo.png` and `heart.ico`, and maps the corresponding BMP to `runtime/assets/icon.bmp`. See [brand notes](../mod/action-edition/branding/BRAND_NOTES.md).
 
 ## Updates and source
 
-The repository and unchanged 0.10.1 release are restored through **Composure** at [Kingdom Hearts Chain of Memories: Zwebti Mix](https://github.com/ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix). All five release attachments were checked against their saved SHA256 values. The release tag's tree matches the original local 0.10.1 source; main also includes later development caching, CI and research documentation.
+The [0.11.1 release](https://github.com/ramizwebti/kingdom-hearts-chain-of-memories-zwebti-mix/releases/tag/v0.11.1) is published through **Composure**. Its source tag matches the hosted packaging commit; all server asset digests and sizes match the verified outputs. The previous 0.10.1 release remains intact. See [PACKAGING.md](PACKAGING.md) for the hosted build and exact-runtime/synthetic-upgrade checks; the local installation also retains all 16 profile files and prior versions.
 
-The launcher defaults to this exact project repository. A nonempty `updates.json` naming another repository is rejected. Public updates use the published release's `Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-0.11.0.zip` plus its `.sha256` file. The updater prefers this full project filename and accepts the old `Zwebti-Mix-VERSION.zip` pair for existing releases. It never mixes the two pairs. Updates preserve profiles and immutable previous versions. A complete live network update through the launcher must be distinguished from local installation and updater/store checks. Private-repository authentication is not implemented.
+The launcher defaults to this exact project repository. A nonempty `updates.json` naming another repository is rejected. Public updates use the published release's `Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-0.11.1.zip` plus its `.sha256` file. The updater prefers this full project filename and accepts the old `Zwebti-Mix-VERSION.zip` pair for existing releases. It never mixes the two pairs. Updates preserve profiles and immutable previous versions. A complete live network update through the launcher must be distinguished from local installation and updater/store checks. Private-repository authentication is not implemented.
 
 No ROMs, saves, credentials, personal settings, logs, generated binaries or toolchains belong in source or releases. Upstream source and notices retain their terms. See [VALIDATION.md](VALIDATION.md) for current checks and limits; old reports cannot validate a changed guest.

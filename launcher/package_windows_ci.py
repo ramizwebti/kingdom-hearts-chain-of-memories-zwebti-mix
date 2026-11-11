@@ -173,17 +173,17 @@ def download_runtime(folder):
 
 def verify_install(executable, install, release_files, archive_sha256, environment):
     profile = install / 'profile'
-    previous = install / 'versions/0.10.1'
+    previous = install / 'versions/0.11.0'
     sentinels = {
         profile / 'data/story.sav': b'SYNTHETIC STORY SAVE\x00\xff\r\n',
         profile / 'practice-data/practice.sav': b'SYNTHETIC PRACTICE SAVE\x00\x01',
         profile / 'controller-settings.txt': b'SYNTHETIC SETTINGS = preserve bytes\r\n',
-        previous / 'previous-version-sentinel.txt': b'SYNTHETIC RETAINED 0.10.1\r\n',
+        previous / 'previous-version-sentinel.txt': b'SYNTHETIC RETAINED 0.11.0\r\n',
     }
     for path, contents in sentinels.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(contents)
-    (install / 'active-version.txt').write_text('0.10.1\n', encoding='ascii')
+    (install / 'active-version.txt').write_text('0.11.0\n', encoding='ascii')
     before_profile, before_previous = file_map(profile), file_map(previous)
     installed_before = None
     checks = []
@@ -205,7 +205,7 @@ def verify_install(executable, install, release_files, archive_sha256, environme
             raise ValueError('Second verify-install changed the installed version')
         installed_before = installed
         checks.append(dict(attempt=attempt,
-                           operation='upgrade from synthetic 0.10.1' if attempt == 1 else 'idempotent launcher relaunch',
+                           operation='upgrade from synthetic 0.11.0' if attempt == 1 else 'idempotent launcher relaunch',
                            activated=launcher_build.VERSION,
                            profile_byte_identical=True, previous_version_retained=True,
                            installed_payload_exact=True))

@@ -1,4 +1,4 @@
-# Kingdom Hearts Chain of Memories: Zwebti Mix — local development
+# Kingdom Hearts Chain of Memories: Zwebti Mix  -  local development
 
 Keep Norton enabled. Development uses one clearly named folder inside this checkout:
 
