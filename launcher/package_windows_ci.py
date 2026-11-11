@@ -310,7 +310,13 @@ def main():
         raise ValueError('Release checksum sidecar is inconsistent')
     executable = output / f'Kingdom Hearts Chain of Memories - Zwebti Mix {launcher_build.VERSION}.exe'
     (output / launcher_build.EXE_NAME).rename(executable)
-    installation = verify_install(executable, package_root / 'isolated-install', release_files,
+    # The classic Framework installer uses Windows path APIs. This checkout's
+    # fully qualified GitHub workspace can exceed their path limit after the
+    # immutable version and branding paths are appended. The synthetic install
+    # belongs in this hosted job's short temporary directory, never a profile.
+    isolated_install = Path(os.environ['RUNNER_TEMP']).resolve() / (
+        'Kingdom-Hearts-Chain-of-Memories-Zwebti-Mix-Install-Check')
+    installation = verify_install(executable, isolated_install, release_files,
                                   release_sha, environment)
     catalog_archive, catalog = package_native_catalog(package_root / 'catalog', output, environment)
     expected_outputs = {executable.name, release.name, checksum.name, catalog_archive.name}
